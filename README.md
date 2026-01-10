@@ -15,8 +15,6 @@ Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
 ## Installation
 
-**Requirements:** Go 1.21+ and git must be installed.
-
 ### Quick Install
 
 ```bash
@@ -24,13 +22,16 @@ curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/i
 ```
 
 This will:
-- Clone the repository
-- Build the binary
+- Detect your platform (Linux/macOS, x64/ARM)
+- Download the latest release binary
+- Verify checksum (SHA256)
 - Install to `~/.local/bin/claude-chats`
 
-### Manual Installation
+**Requirements:** curl or wget (usually pre-installed on Linux/macOS)
 
-See [docs/install-from-source.md](docs/install-from-source.md) for manual build instructions.
+### Build from Source
+
+See [docs/install-from-source.md](docs/install-from-source.md) for manual build instructions (requires Go 1.21+).
 
 ## Usage
 
