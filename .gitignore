@@ -1,0 +1,29 @@
+# Binaries
+claude-chats
+claude-chats-*
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+*.out
+coverage.txt
+
+# Temporary
+.gopath/
+*.log
