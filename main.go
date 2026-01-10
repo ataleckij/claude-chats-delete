@@ -13,6 +13,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Config stores application configuration
+type Config struct {
+	ClaudeDir string `json:"claude_dir"`
+}
+
 // Chat represents a single chat session
 type Chat struct {
 	UUID      string
@@ -32,11 +37,12 @@ type JSONLMessage struct {
 }
 
 var (
-	claudeDir    = filepath.Join(os.Getenv("HOME"), ".claude")
-	projectsDir  = filepath.Join(claudeDir, "projects")
-	debugDir     = filepath.Join(claudeDir, "debug")
-	todosDir     = filepath.Join(claudeDir, "todos")
-	sessionDir   = filepath.Join(claudeDir, "session-env")
+	configPath  = filepath.Join(os.Getenv("HOME"), ".config", "claude-chats", "config.json")
+	claudeDir   string
+	projectsDir string
+	debugDir    string
+	todosDir    string
+	sessionDir  string
 
 	// Styles
 	titleStyle = lipgloss.NewStyle().
@@ -436,7 +442,103 @@ func findRelatedFiles(uuid string) []string {
 	return files
 }
 
+// Config management
+
+func loadConfig() (*Config, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var config Config
+	if err := json.Unmarshal(data, &config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+func saveConfig(config *Config) error {
+	// Create config directory if it doesn't exist
+	configDir := filepath.Dir(configPath)
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(configPath, data, 0644)
+}
+
+func promptForClaudeDir() (string, error) {
+	defaultDir := filepath.Join(os.Getenv("HOME"), ".claude")
+
+	fmt.Println("Claude Chat Manager - First Run Setup")
+	fmt.Println()
+	fmt.Printf("Enter the path to your Claude directory (default: %s)\n", defaultDir)
+	fmt.Print("Path [press Enter for default]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return defaultDir, nil
+	}
+
+	// Expand ~ to home directory
+	if strings.HasPrefix(input, "~") {
+		input = filepath.Join(os.Getenv("HOME"), input[1:])
+	}
+
+	return input, nil
+}
+
+func initializePaths(dir string) {
+	claudeDir = dir
+	projectsDir = filepath.Join(claudeDir, "projects")
+	debugDir = filepath.Join(claudeDir, "debug")
+	todosDir = filepath.Join(claudeDir, "todos")
+	sessionDir = filepath.Join(claudeDir, "session-env")
+}
+
 func main() {
+	// Load or create config
+	config, err := loadConfig()
+	if err != nil {
+		// First run - prompt for directory
+		dir, err := promptForClaudeDir()
+		if err != nil {
+			fmt.Printf("Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Validate directory exists
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			fmt.Printf("Error: Directory does not exist: %s\n", dir)
+			fmt.Println("Please create the directory or specify a different path.")
+			os.Exit(1)
+		}
+
+		// Save config
+		config = &Config{ClaudeDir: dir}
+		if err := saveConfig(config); err != nil {
+			fmt.Printf("Warning: Could not save config: %v\n", err)
+		} else {
+			fmt.Printf("\n✓ Configuration saved to: %s\n\n", configPath)
+		}
+	}
+
+	// Initialize paths from config
+	initializePaths(config.ClaudeDir)
+
+	// Run TUI
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
