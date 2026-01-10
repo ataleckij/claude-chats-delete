@@ -1,4 +1,4 @@
-# Claude Chats Delete
+# Claude Code Chats Delete
 
 **Delete and remove Claude Code chat sessions** with an interactive terminal UI.
 
@@ -15,34 +15,22 @@ Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
 ## Installation
 
-### From Source
+**Requirements:** Go 1.21+ and git must be installed.
+
+### Quick Install
 
 ```bash
-# Clone or download the repository
-git clone https://github.com/ataleckij/claude-chats-delete.git
-cd claude-chats-delete
-
-# Install dependencies
-go mod download
-
-# Build
-go build -o claude-chats
-
-# Install to /usr/local/bin (optional)
-sudo mv claude-chats /usr/local/bin/
-
-# Or install to ~/.local/bin (no sudo)
-mkdir -p ~/.local/bin
-mv claude-chats ~/.local/bin/
-# Make sure ~/.local/bin is in your PATH
+curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/install.sh | sh
 ```
 
-### Quick Install (one-liner)
+This will:
+- Clone the repository
+- Build the binary
+- Install to `~/.local/bin/claude-chats`
 
-```bash
-# Build and install to ~/.local/bin
-go build -o ~/.local/bin/claude-chats
-```
+### Manual Installation
+
+See [docs/install-from-source.md](docs/install-from-source.md) for manual build instructions.
 
 ## Usage
 
@@ -73,42 +61,11 @@ All related files are deleted:
 - Todo files (`todos/*.json`)
 - Session environment (`session-env/*/`)
 
-## Development
+## Configuration
 
-### Requirements
+On first run, you'll be prompted to specify your Claude directory. Configuration is saved to `~/.config/claude-chats/config.json`.
 
-- Go 1.21+
-- Dependencies:
-  - `github.com/charmbracelet/bubbletea` - TUI framework
-  - `github.com/charmbracelet/lipgloss` - Terminal styling
-
-### Building
-
-```bash
-# Download dependencies
-go mod download
-
-# Build
-go build -o claude-chats
-
-# Run
-./claude-chats
-```
-
-### Cross-compilation
-
-```bash
-# macOS (ARM)
-GOOS=darwin GOARCH=arm64 go build -o claude-chats-darwin-arm64
-
-# macOS (Intel)
-GOOS=darwin GOARCH=amd64 go build -o claude-chats-darwin-amd64
-
-# Linux
-GOOS=linux GOARCH=amd64 go build -o claude-chats-linux-amd64
-```
-
-## Structure
+## Claude Directory Structure
 
 The tool manages files in `~/.claude/`:
 
@@ -125,20 +82,6 @@ The tool manages files in `~/.claude/`:
     └── <uuid>/                   # Session environments
 ```
 
-## Comparison with Python Version
-
-| Feature | Python | Go |
-|---------|--------|-----|
-| Dependencies | curses (stdlib) | bubbletea (external) |
-| Binary size | N/A (interpreted) | ~5-10 MB |
-| Startup time | ~100ms | ~10ms |
-| Installation | Copy script | Single binary |
-| Cross-platform | Requires Python | Compile once, run anywhere |
-
 ## License
 
 MIT
-
-## Contributing
-
-Pull requests welcome!
