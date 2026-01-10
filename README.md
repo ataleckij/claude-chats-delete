@@ -1,8 +1,10 @@
-# Claude Code Chats Delete
+# Claude Code Chats Delete TUI
 
 **Delete and remove Claude Code chat sessions** with an interactive terminal UI.
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
+
+<img src="./demo.gif" />
 
 ## Features
 

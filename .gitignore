@@ -6,6 +6,9 @@ claude-chats-*
 *.so
 *.dylib
 
+# Claude
+.claude/
+
 # Go
 vendor/
 
