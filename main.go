@@ -313,8 +313,8 @@ func (m model) deleteSelectedChats() tea.Cmd {
 					if err := os.RemoveAll(file); err != nil {
 						return errMsg(fmt.Sprintf("Failed to delete %s: %v", file, err))
 					}
-					count++
 				}
+				count++
 			}
 		}
 		return deleteCompleteMsg{count: count}
