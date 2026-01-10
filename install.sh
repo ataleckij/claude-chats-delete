@@ -144,7 +144,7 @@ mkdir -p "$INSTALL_DIR"
 if [ -f "$INSTALL_DIR/$BINARY_NAME" ]; then
     echo ""
     echo -e "${YELLOW}Found existing installation at ${INSTALL_DIR}/${BINARY_NAME}${NC}"
-    read -p "Overwrite? [y/N] " -n 1 -r
+    read -p "Overwrite? [y/N] " -n 1 -r </dev/tty
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "Installation cancelled"
