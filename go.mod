@@ -1,4 +1,4 @@
-module github.com/yourusername/claude-chats
+module github.com/ataleckij/claude-chats-delete
 
 go 1.21
 

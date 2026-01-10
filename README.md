@@ -1,14 +1,16 @@
-# Claude Chat Manager
+# Claude Chats Delete
 
-Interactive TUI tool for managing Claude Code chat sessions stored in `~/.claude` directory.
+**Delete and remove Claude Code chat sessions** with an interactive terminal UI.
+
+Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
 ## Features
 
 - Browse all chat sessions across projects
 - View chat titles, timestamps, and projects
 - Multiple selection with visual indicators
-- Delete chats with related files (debug, todos, session-env)
-- Keyboard-driven navigation
+- Delete chats with all related files (debug logs, todos, session-env)
+- Keyboard-driven navigation (vim-style support)
 - Color-coded interface
 
 ## Installation
@@ -17,8 +19,8 @@ Interactive TUI tool for managing Claude Code chat sessions stored in `~/.claude
 
 ```bash
 # Clone or download the repository
-git clone https://github.com/yourusername/claude-chats.git
-cd claude-chats
+git clone https://github.com/ataleckij/claude-chats-delete.git
+cd claude-chats-delete
 
 # Install dependencies
 go mod download
