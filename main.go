@@ -81,6 +81,7 @@ type model struct {
 	deleting      bool
 	deleted       int
 	error         string
+	width         int
 	height        int
 	scrollOffset  int
 }
@@ -100,6 +101,7 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
 
@@ -191,6 +193,24 @@ func (m model) View() string {
 		return titleStyle.Render("No chats found.") + "\n\nPress q to quit.\n"
 	}
 
+	// Calculate column widths based on terminal width
+	// Fixed: indicator(4) + timestamp(19) + gaps(4) = 27
+	width := m.width
+	if width < 60 {
+		width = 60 // minimum width
+	}
+
+	remaining := width - 27
+	titleWidth := remaining * 70 / 100 // 70% for title
+	projectWidth := remaining - titleWidth
+
+	if titleWidth < 30 {
+		titleWidth = 30
+	}
+	if projectWidth < 10 {
+		projectWidth = 10
+	}
+
 	var s strings.Builder
 
 	// Header
@@ -203,10 +223,11 @@ func (m model) View() string {
 	s.WriteString("\n\n")
 
 	// Column headers
-	header := fmt.Sprintf("%-20s %-45s %-30s", "TIMESTAMP", "TITLE", "PROJECT")
+	headerFmt := fmt.Sprintf("     %%-19s  %%-%ds  %%-%ds", titleWidth, projectWidth)
+	header := fmt.Sprintf(headerFmt, "TIMESTAMP", "TITLE", "PROJECT")
 	s.WriteString(dimStyle.Render(header))
 	s.WriteString("\n")
-	s.WriteString(strings.Repeat("─", 100))
+	s.WriteString(strings.Repeat("─", width))
 	s.WriteString("\n")
 
 	// Chat list
@@ -231,13 +252,13 @@ func (m model) View() string {
 		}
 
 		title := chat.Title
-		if len(title) > 43 {
-			title = title[:43] + ".."
+		if len(title) > titleWidth-2 {
+			title = title[:titleWidth-2] + ".."
 		}
 
 		project := chat.Project
-		if len(project) > 28 {
-			project = project[:28] + ".."
+		if len(project) > projectWidth-2 {
+			project = project[:projectWidth-2] + ".."
 		}
 
 		// Selection indicator
@@ -246,8 +267,8 @@ func (m model) View() string {
 			indicator = "[✓]"
 		}
 
-		line := fmt.Sprintf("%s %-19s %-45s %-30s",
-			indicator, timestamp, title, project)
+		lineFmt := fmt.Sprintf("%%s %%-19s  %%-%ds  %%-%ds", titleWidth, projectWidth)
+		line := fmt.Sprintf(lineFmt, indicator, timestamp, title, project)
 
 		// Apply styles
 		style := lipgloss.NewStyle()
@@ -392,11 +413,7 @@ func getChatTitle(jsonlFile string) string {
 			}
 
 			if msg.Type == "user" {
-				content := msg.Message.Content
-				if len(content) > 60 {
-					return content[:60] + "..."
-				}
-				return content
+				return msg.Message.Content
 			}
 		}
 		if lineNum > 2 {
