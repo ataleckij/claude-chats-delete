@@ -37,12 +37,13 @@ type JSONLMessage struct {
 }
 
 var (
-	configPath  = filepath.Join(os.Getenv("HOME"), ".config", "claude-chats", "config.json")
-	claudeDir   string
-	projectsDir string
-	debugDir    string
-	todosDir    string
-	sessionDir  string
+	configPath     = filepath.Join(os.Getenv("HOME"), ".config", "claude-chats", "config.json")
+	claudeDir      string
+	projectsDir    string
+	debugDir       string
+	todosDir       string
+	sessionDir     string
+	fileHistoryDir string
 
 	// Styles
 	titleStyle = lipgloss.NewStyle().
@@ -417,10 +418,16 @@ func getChatTimestamp(jsonlFile string) string {
 func findRelatedFiles(uuid string) []string {
 	var files []string
 
-	// Main JSONL file
+	// Main JSONL file and subagents directory
 	matches, _ := filepath.Glob(filepath.Join(projectsDir, "*", uuid+".jsonl"))
 	for _, m := range matches {
 		files = append(files, m)
+
+		// Subagents directory (same name as jsonl but without extension)
+		subagentsDir := strings.TrimSuffix(m, ".jsonl")
+		if _, err := os.Stat(subagentsDir); err == nil {
+			files = append(files, subagentsDir)
+		}
 	}
 
 	// Debug file
@@ -437,6 +444,12 @@ func findRelatedFiles(uuid string) []string {
 	sessionPath := filepath.Join(sessionDir, uuid)
 	if _, err := os.Stat(sessionPath); err == nil {
 		files = append(files, sessionPath)
+	}
+
+	// File history directory
+	fileHistoryPath := filepath.Join(fileHistoryDir, uuid)
+	if _, err := os.Stat(fileHistoryPath); err == nil {
+		files = append(files, fileHistoryPath)
 	}
 
 	return files
@@ -506,6 +519,7 @@ func initializePaths(dir string) {
 	debugDir = filepath.Join(claudeDir, "debug")
 	todosDir = filepath.Join(claudeDir, "todos")
 	sessionDir = filepath.Join(claudeDir, "session-env")
+	fileHistoryDir = filepath.Join(claudeDir, "file-history")
 }
 
 func main() {

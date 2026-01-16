@@ -11,7 +11,7 @@ Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 - Browse all chat sessions across projects
 - View chat titles, timestamps, and projects
 - Multiple selection with visual indicators
-- Delete chats with all related files (debug logs, todos, session-env)
+- Delete chats with all related files (subagents, file-history, debug, todos, session-env)
 - Keyboard-driven navigation (vim-style support)
 - Color-coded interface
 
@@ -60,6 +60,8 @@ When you press `d`:
 
 All related files are deleted:
 - Main chat file (`.jsonl`)
+- Subagents directory (`<uuid>/subagents/`)
+- File history (`file-history/<uuid>/`)
 - Debug logs (`debug/*.txt`)
 - Todo files (`todos/*.json`)
 - Session environment (`session-env/*/`)
@@ -74,15 +76,14 @@ The tool manages files in `~/.claude/`:
 
 ```
 ~/.claude/
-├── projects/
-│   └── <project-name>/
-│       └── <uuid>.jsonl          # Chat sessions
-├── debug/
-│   └── <uuid>.txt                # Debug logs
-├── todos/
-│   └── <uuid>*.json              # Todo lists
-└── session-env/
-    └── <uuid>/                   # Session environments
+├── projects/<project>/
+│   ├── <uuid>.jsonl              # Main chat file
+│   └── <uuid>/                   # Chat directory
+│       └── subagents/            # Subagent conversations
+├── file-history/<uuid>/          # File version history
+├── debug/<uuid>.txt              # Debug logs
+├── todos/<uuid>-*.json           # Todo lists
+└── session-env/<uuid>/           # Session environments
 ```
 
 ## License
