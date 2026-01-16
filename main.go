@@ -201,7 +201,7 @@ func (m model) View() string {
 	}
 
 	remaining := width - 27
-	titleWidth := remaining * 70 / 100 // 70% for title
+	titleWidth := remaining * 60 / 100 // 60% for title
 	projectWidth := remaining - titleWidth
 
 	if titleWidth < 30 {
