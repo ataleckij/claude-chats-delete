@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -86,6 +89,8 @@ type model struct {
 	width         int
 	height        int
 	scrollOffset  int
+	copiedMsg     string
+	copyId        int
 }
 
 func initialModel() model {
@@ -155,6 +160,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			m.scrollOffset = 0
 			m.error = ""
+
+		case "c":
+			// Copy UUID to clipboard
+			if m.cursor < len(m.chats) {
+				uuid := m.chats[m.cursor].UUID
+				if err := copyToClipboard(uuid); err != nil {
+					m.error = fmt.Sprintf("Failed to copy: %v", err)
+				} else {
+					m.copyId++
+					currentId := m.copyId
+					m.copiedMsg = fmt.Sprintf("Chat UUID copied: %s", uuid)
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return clearCopiedMsg{id: currentId}
+					})
+				}
+			}
 		}
 
 	case deleteCompleteMsg:
@@ -172,6 +193,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.deleting = false
 		m.error = string(msg)
+
+	case clearCopiedMsg:
+		if msg.id == m.copyId {
+			m.copiedMsg = ""
+		}
 	}
 
 	return m, nil
@@ -308,6 +334,10 @@ func (m model) View() string {
 		s.WriteString(successStyle.Render(fmt.Sprintf("✓ Deleted %d chat(s)", m.deleted)))
 		s.WriteString("\n")
 	}
+	if m.copiedMsg != "" {
+		s.WriteString(successStyle.Render("✓ " + m.copiedMsg))
+		s.WriteString("\n")
+	}
 
 	// Confirmation dialog
 	if m.confirmDelete {
@@ -318,7 +348,7 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		// Help
-		help := "↑/↓:Navigate | SPACE:Select/Deselect | D:Delete | R:Refresh | Q:Quit"
+		help := "↑/↓:Navigate | SPACE:Select/Deselect | C:Copy UUID | D:Delete | R:Refresh | Q:Quit"
 		s.WriteString(helpStyle.Render(help))
 	}
 
@@ -331,6 +361,35 @@ type deleteCompleteMsg struct {
 }
 
 type errMsg string
+
+type clearCopiedMsg struct {
+	id int
+}
+
+func copyToClipboard(text string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "linux":
+		// Try xclip first, then xsel
+		if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.Command("xsel", "--clipboard", "--input")
+		} else if _, err := exec.LookPath("wl-copy"); err == nil {
+			cmd = exec.Command("wl-copy")
+		} else {
+			return fmt.Errorf("no clipboard utility found (install xclip, xsel, or wl-copy)")
+		}
+	default:
+		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
+	}
+
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
+}
 
 func (m model) deleteSelectedChats() tea.Cmd {
 	return func() tea.Msg {

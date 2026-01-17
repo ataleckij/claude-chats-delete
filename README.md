@@ -11,7 +11,8 @@ Tested with Claude Code v2.1.7.
 ## Features
 
 - Browse all chat sessions across projects
-- View chat titles, timestamps, and projects
+- View chat titles, timestamps, versions, and projects
+- Copy chat UUID to clipboard
 - Multiple selection with visual indicators
 - Delete chats with all related files (subagents, file-history, debug, todos, session-env)
 - Keyboard-driven navigation (vim-style support)
@@ -49,6 +50,7 @@ claude-chats
 |-----|--------|
 | `↑/↓` or `k/j` | Navigate up/down |
 | `SPACE` | Select/deselect current chat |
+| `c` | Copy chat UUID to clipboard |
 | `d` | Delete selected chats (with confirmation) |
 | `r` | Refresh chat list |
 | `q` or `Ctrl+C` | Quit |
