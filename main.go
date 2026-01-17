@@ -24,6 +24,7 @@ type Chat struct {
 	Title     string
 	Timestamp string
 	Project   string
+	Version   string
 	Path      string
 	Files     []string // related files for deletion
 }
@@ -31,6 +32,7 @@ type Chat struct {
 // JSONLMessage represents a message in the JSONL file
 type JSONLMessage struct {
 	Type    string `json:"type"`
+	Version string `json:"version"`
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
@@ -194,13 +196,14 @@ func (m model) View() string {
 	}
 
 	// Calculate column widths based on terminal width
-	// Fixed: indicator(4) + timestamp(19) + gaps(4) = 27
+	// Fixed: indicator(4) + timestamp(19) + version(8) + gaps(6) = 37
 	width := m.width
-	if width < 60 {
-		width = 60 // minimum width
+	if width < 70 {
+		width = 70 // minimum width
 	}
 
-	remaining := width - 27
+	versionWidth := 8
+	remaining := width - 37
 	titleWidth := remaining * 60 / 100 // 60% for title
 	projectWidth := remaining - titleWidth
 
@@ -223,8 +226,8 @@ func (m model) View() string {
 	s.WriteString("\n\n")
 
 	// Column headers
-	headerFmt := fmt.Sprintf("     %%-19s  %%-%ds  %%-%ds", titleWidth, projectWidth)
-	header := fmt.Sprintf(headerFmt, "TIMESTAMP", "TITLE", "PROJECT")
+	headerFmt := fmt.Sprintf("    %%-19s  %%-%ds  %%-%ds  %%-%ds", versionWidth, titleWidth, projectWidth)
+	header := fmt.Sprintf(headerFmt, "TIMESTAMP", "VERSION", "TITLE", "PROJECT")
 	s.WriteString(dimStyle.Render(header))
 	s.WriteString("\n")
 	s.WriteString(strings.Repeat("─", width))
@@ -261,14 +264,19 @@ func (m model) View() string {
 			project = project[:projectWidth-2] + ".."
 		}
 
+		version := chat.Version
+		if len(version) > versionWidth-1 {
+			version = version[:versionWidth-1]
+		}
+
 		// Selection indicator
 		indicator := "[ ]"
 		if m.selected[i] {
 			indicator = "[✓]"
 		}
 
-		lineFmt := fmt.Sprintf("%%s %%-19s  %%-%ds  %%-%ds", titleWidth, projectWidth)
-		line := fmt.Sprintf(lineFmt, indicator, timestamp, title, project)
+		lineFmt := fmt.Sprintf("%%s %%-19s  %%-%ds  %%-%ds  %%-%ds", versionWidth, titleWidth, projectWidth)
+		line := fmt.Sprintf(lineFmt, indicator, timestamp, version, title, project)
 
 		// Apply styles
 		style := lipgloss.NewStyle()
@@ -375,12 +383,14 @@ func findAllChats() []Chat {
 
 			title := getChatTitle(file)
 			timestamp := getChatTimestamp(file)
+			version := getChatVersion(file)
 
 			chats = append(chats, Chat{
 				UUID:      uuid,
 				Title:     title,
 				Timestamp: timestamp,
 				Project:   entry.Name(),
+				Version:   version,
 				Path:      file,
 			})
 		}
@@ -430,6 +440,33 @@ func getChatTimestamp(jsonlFile string) string {
 		return "Unknown"
 	}
 	return info.ModTime().Format("2006-01-02 15:04:05")
+}
+
+func getChatVersion(jsonlFile string) string {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+
+	for scanner.Scan() {
+		lineNum++
+		if lineNum == 2 { // Second line (first user message)
+			var msg JSONLMessage
+			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+				return ""
+			}
+			return msg.Version
+		}
+		if lineNum > 2 {
+			break
+		}
+	}
+
+	return ""
 }
 
 func findRelatedFiles(uuid string) []string {
