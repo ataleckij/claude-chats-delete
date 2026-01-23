@@ -14,6 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 // Config stores application configuration
@@ -298,26 +299,11 @@ func (m model) View() string {
 	for i := start; i < end; i++ {
 		chat := m.chats[i]
 
-		// Truncate fields
-		timestamp := chat.Timestamp
-		if len(timestamp) > 19 {
-			timestamp = timestamp[:19]
-		}
-
-		title := chat.Title
-		if len(title) > titleWidth-2 {
-			title = title[:titleWidth-2] + ".."
-		}
-
-		project := chat.Project
-		if len(project) > projectWidth-2 {
-			project = project[:projectWidth-2] + ".."
-		}
-
-		version := chat.Version
-		if len(version) > versionWidth-1 {
-			version = version[:versionWidth-1]
-		}
+		// Truncate fields using visual width
+		timestamp := runewidth.Truncate(chat.Timestamp, 19, "")
+		version := runewidth.Truncate(chat.Version, versionWidth-1, "")
+		title := runewidth.Truncate(chat.Title, titleWidth-2, "..")
+		project := runewidth.Truncate(chat.Project, projectWidth-2, "..")
 
 		// Selection indicator
 		indicator := "[ ]"
