@@ -37,6 +37,7 @@ type JSONLMessage struct {
 	Type    string `json:"type"`
 	Version string `json:"version"`
 	Slug    string `json:"slug"`
+	IsMeta  bool   `json:"isMeta"`
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
@@ -492,6 +493,45 @@ func findAllChats() []Chat {
 	return chats
 }
 
+func cleanSystemTags(content string) string {
+	// Remove content within system tags (including the tags themselves)
+	systemTagPairs := [][2]string{
+		{"<local-command-caveat>", "</local-command-caveat>"},
+		{"<command-name>", "</command-name>"},
+		{"<command-message>", "</command-message>"},
+		{"<command-args>", "</command-args>"},
+		{"<local-command-stdout>", "</local-command-stdout>"},
+		{"<system-reminder>", "</system-reminder>"},
+	}
+
+	cleaned := content
+	for _, pair := range systemTagPairs {
+		start := strings.Index(cleaned, pair[0])
+		for start >= 0 {
+			end := strings.Index(cleaned[start:], pair[1])
+			if end >= 0 {
+				end += start + len(pair[1])
+				cleaned = cleaned[:start] + cleaned[end:]
+			} else {
+				// No closing tag, remove from start tag onwards
+				cleaned = cleaned[:start]
+				break
+			}
+			start = strings.Index(cleaned, pair[0])
+		}
+	}
+
+	// Trim whitespace and newlines
+	cleaned = strings.TrimSpace(cleaned)
+
+	// If content is empty or only contains tags/whitespace, return empty
+	if cleaned == "" || strings.HasPrefix(cleaned, "<") {
+		return ""
+	}
+
+	return cleaned
+}
+
 func getChatTitle(jsonlFile string) string {
 	file, err := os.Open(jsonlFile)
 	if err != nil {
@@ -504,17 +544,27 @@ func getChatTitle(jsonlFile string) string {
 
 	for scanner.Scan() {
 		lineNum++
-		if lineNum == 2 { // Second line (first user message)
-			var msg JSONLMessage
-			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-				return "[Error parsing JSON]"
-			}
+		if lineNum == 1 {
+			continue // Skip first line (file-history-snapshot)
+		}
 
-			if msg.Type == "user" {
-				return msg.Message.Content
+		var msg JSONLMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+
+		// Skip meta messages and find first real user message
+		if msg.Type == "user" && !msg.IsMeta {
+			content := msg.Message.Content
+			// Clean up system tags
+			content = cleanSystemTags(content)
+			if content != "" {
+				return content
 			}
 		}
-		if lineNum > 2 {
+
+		// Stop after checking reasonable number of lines
+		if lineNum > 20 {
 			break
 		}
 	}
