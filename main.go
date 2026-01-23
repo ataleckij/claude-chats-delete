@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,7 +20,10 @@ import (
 
 // Config stores application configuration
 type Config struct {
-	ClaudeDir string `json:"claude_dir"`
+	ClaudeDir              string `json:"claude_dir"`
+	AutoUpdates            bool   `json:"auto_updates"`
+	LastUpdateCheck        int64  `json:"last_update_check"`
+	UpdateCheckIntervalHrs int    `json:"update_check_interval_hours"`
 }
 
 // Chat represents a single chat session
@@ -794,6 +798,17 @@ func initializePaths(dir string) {
 }
 
 func main() {
+	// Parse command-line flags
+	updateFlag := flag.Bool("update", false, "Check for updates and install if available")
+	versionFlag := flag.Bool("version", false, "Show current version")
+	flag.Parse()
+
+	// Show version
+	if *versionFlag {
+		fmt.Printf("claude-chats v%s\n", CurrentVersion)
+		os.Exit(0)
+	}
+
 	// Load or create config
 	config, err := loadConfig()
 	if err != nil {
@@ -811,8 +826,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Save config
-		config = &Config{ClaudeDir: dir}
+		// Save config with defaults
+		config = &Config{
+			ClaudeDir:              dir,
+			AutoUpdates:            true,  // Enable by default
+			UpdateCheckIntervalHrs: 1,     // Check every hour
+			LastUpdateCheck:        0,
+		}
 		if err := saveConfig(config); err != nil {
 			fmt.Printf("Warning: Could not save config: %v\n", err)
 		} else {
@@ -820,8 +840,44 @@ func main() {
 		}
 	}
 
+	// Set defaults for existing configs without update settings
+	if config.UpdateCheckIntervalHrs == 0 {
+		config.UpdateCheckIntervalHrs = 1
+		config.AutoUpdates = true
+	}
+
 	// Initialize paths from config
 	initializePaths(config.ClaudeDir)
+
+	// Manual update check
+	if *updateFlag {
+		fmt.Printf("Checking for updates...\n")
+		if newVersion := checkForUpdate(); newVersion != "" {
+			promptAndUpdate(newVersion)
+		} else {
+			fmt.Printf("You're up to date (v%s)\n", CurrentVersion)
+		}
+		return
+	}
+
+	// Automatic update check (on startup)
+	if config.AutoUpdates &&
+		os.Getenv("CLAUDE_CHATS_DISABLE_AUTOUPDATER") != "1" &&
+		shouldCheckUpdate(config.LastUpdateCheck, config.UpdateCheckIntervalHrs) {
+
+		if newVersion := checkForUpdate(); newVersion != "" {
+			// Update last check time
+			config.LastUpdateCheck = time.Now().Unix()
+			saveConfig(config)
+
+			// Prompt for update
+			promptAndUpdate(newVersion)
+		} else {
+			// Update last check time even if no update available
+			config.LastUpdateCheck = time.Now().Unix()
+			saveConfig(config)
+		}
+	}
 
 	// Run TUI
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())

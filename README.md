@@ -17,6 +17,7 @@ Tested with Claude Code v2.1.7.
 - Delete chats with all related files (subagents, file-history, debug, todos, session-env)
 - Keyboard-driven navigation (vim-style support)
 - Color-coded interface
+- Auto-update on startup (checks GitHub for new releases)
 
 ## Installation
 
@@ -69,6 +70,31 @@ All related files are deleted:
 - Debug logs (`debug/*.txt`)
 - Todo files (`todos/*.json`)
 - Session environment (`session-env/*/`)
+
+## Updates
+
+The tool automatically checks for updates on startup (once per hour). When a new version is available, you'll be prompted to install it.
+
+### Manual Update Check
+
+```bash
+claude-chats --update  # Check for updates manually
+claude-chats --version # Show current version
+```
+
+### Disable Auto-Updates
+
+Set environment variable:
+```bash
+export CLAUDE_CHATS_DISABLE_AUTOUPDATER=1
+```
+
+Or edit `~/.config/claude-chats/config.json`:
+```json
+{
+  "auto_updates": false
+}
+```
 
 ## Configuration
 
