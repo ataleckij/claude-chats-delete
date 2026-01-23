@@ -36,9 +36,31 @@ type Chat struct {
 type JSONLMessage struct {
 	Type    string `json:"type"`
 	Version string `json:"version"`
+	Slug    string `json:"slug"`
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
+}
+
+// SessionsIndex represents the sessions-index.json structure
+type SessionsIndex struct {
+	Version      int            `json:"version"`
+	Entries      []SessionEntry `json:"entries"`
+	OriginalPath string         `json:"originalPath"`
+}
+
+type SessionEntry struct {
+	SessionID    string `json:"sessionId"`
+	FullPath     string `json:"fullPath"`
+	FileMtime    int64  `json:"fileMtime"`
+	FirstPrompt  string `json:"firstPrompt"`
+	Summary      string `json:"summary"`
+	MessageCount int    `json:"messageCount"`
+	Created      string `json:"created"`
+	Modified     string `json:"modified"`
+	GitBranch    string `json:"gitBranch"`
+	ProjectPath  string `json:"projectPath"`
+	IsSidechain  bool   `json:"isSidechain"`
 }
 
 var (
@@ -49,6 +71,7 @@ var (
 	todosDir       string
 	sessionDir     string
 	fileHistoryDir string
+	plansDir       string
 
 	// Styles
 	titleStyle = lipgloss.NewStyle().
@@ -403,6 +426,12 @@ func (m model) deleteSelectedChats() tea.Cmd {
 						return errMsg(fmt.Sprintf("Failed to delete %s: %v", file, err))
 					}
 				}
+
+				// Update sessions-index.json
+				if err := updateSessionsIndex(chat.UUID); err != nil {
+					return errMsg(fmt.Sprintf("Failed to update index: %v", err))
+				}
+
 				count++
 			}
 		}
@@ -528,18 +557,110 @@ func getChatVersion(jsonlFile string) string {
 	return ""
 }
 
+func getSlugFromChat(jsonlFile string) string {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+
+	// Scan all lines to find slug (it can be in any message)
+	for scanner.Scan() {
+		var msg JSONLMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+		if msg.Slug != "" {
+			return msg.Slug
+		}
+	}
+
+	return ""
+}
+
+func updateSessionsIndex(uuid string) error {
+	// Find all sessions-index.json files in project directories
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		indexPath := filepath.Join(projectsDir, entry.Name(), "sessions-index.json")
+		if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Read the index
+		data, err := os.ReadFile(indexPath)
+		if err != nil {
+			continue
+		}
+
+		var index SessionsIndex
+		if err := json.Unmarshal(data, &index); err != nil {
+			continue
+		}
+
+		// Filter out the deleted session
+		originalLen := len(index.Entries)
+		var newEntries []SessionEntry
+		for _, entry := range index.Entries {
+			if entry.SessionID != uuid {
+				newEntries = append(newEntries, entry)
+			}
+		}
+
+		// Only write if something was removed
+		if len(newEntries) < originalLen {
+			index.Entries = newEntries
+
+			// Write back
+			data, err := json.MarshalIndent(index, "", "  ")
+			if err != nil {
+				return err
+			}
+
+			if err := os.WriteFile(indexPath, data, 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func findRelatedFiles(uuid string) []string {
 	var files []string
+	var chatJSONLPath string
 
 	// Main JSONL file and subagents directory
 	matches, _ := filepath.Glob(filepath.Join(projectsDir, "*", uuid+".jsonl"))
 	for _, m := range matches {
 		files = append(files, m)
+		chatJSONLPath = m // Save for slug extraction
 
 		// Subagents directory (same name as jsonl but without extension)
 		subagentsDir := strings.TrimSuffix(m, ".jsonl")
 		if _, err := os.Stat(subagentsDir); err == nil {
 			files = append(files, subagentsDir)
+		}
+	}
+
+	// Plan file (via slug)
+	if chatJSONLPath != "" {
+		slug := getSlugFromChat(chatJSONLPath)
+		if slug != "" {
+			planFile := filepath.Join(plansDir, slug+".md")
+			if _, err := os.Stat(planFile); err == nil {
+				files = append(files, planFile)
+			}
 		}
 	}
 
@@ -633,6 +754,7 @@ func initializePaths(dir string) {
 	todosDir = filepath.Join(claudeDir, "todos")
 	sessionDir = filepath.Join(claudeDir, "session-env")
 	fileHistoryDir = filepath.Join(claudeDir, "file-history")
+	plansDir = filepath.Join(claudeDir, "plans")
 }
 
 func main() {
