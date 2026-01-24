@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CurrentVersion = "0.1.7"
+	CurrentVersion = "0.1.8"
 	GitHubAPIURL   = "https://api.github.com/repos/ataleckij/claude-chats-delete/releases/latest"
 )
 
@@ -87,7 +87,8 @@ func isNewerVersion(latest, current string) bool {
 }
 
 // promptAndUpdate asks user if they want to update and performs the update if yes
-func promptAndUpdate(newVersion string) {
+// Returns true if user declined the update (or update failed), false if update succeeded
+func promptAndUpdate(newVersion string) bool {
 	fmt.Printf("\n")
 	fmt.Printf("Update available: v%s → v%s\n", CurrentVersion, newVersion)
 	fmt.Print("Download and install? [y/N]: ")
@@ -102,14 +103,16 @@ func promptAndUpdate(newVersion string) {
 			fmt.Println("Please update manually:")
 			fmt.Printf("  https://github.com/ataleckij/claude-chats-delete/releases/tag/v%s\n\n", newVersion)
 			time.Sleep(2 * time.Second)
+			return true // Update failed, remember check time
 		} else {
 			fmt.Println("\n✓ Update successful!")
 			fmt.Println("Please restart claude-chats to use the new version.\n")
 			os.Exit(0)
 		}
-	} else {
-		fmt.Println()
 	}
+
+	fmt.Println()
+	return true // User declined
 }
 
 // downloadAndInstall downloads the binary and replaces the current executable
@@ -161,14 +164,14 @@ func downloadAndInstall(version string) error {
 
 	// Backup current binary (optional safety measure)
 	backupPath := exePath + ".backup"
-	if err := os.Rename(exePath, backupPath); err != nil {
+	if err := copyFile(exePath, backupPath); err != nil {
 		return fmt.Errorf("failed to backup current binary: %w", err)
 	}
 
-	// Move new binary to executable location
-	if err := os.Rename(tmpPath, exePath); err != nil {
+	// Copy new binary to executable location
+	if err := copyFile(tmpPath, exePath); err != nil {
 		// Restore backup on failure
-		os.Rename(backupPath, exePath)
+		copyFile(backupPath, exePath)
 		return fmt.Errorf("failed to install new binary: %w", err)
 	}
 
@@ -176,4 +179,34 @@ func downloadAndInstall(version string) error {
 	os.Remove(backupPath)
 
 	return nil
+}
+
+// copyFile copies a file from src to dst, preserving permissions
+func copyFile(src, dst string) error {
+	// Read source file
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	// Get source file info for permissions
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	// Create destination file
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+	defer dstFile.Close()
+
+	// Copy contents
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	return dstFile.Sync()
 }

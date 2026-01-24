@@ -914,7 +914,11 @@ func main() {
 	if *updateFlag {
 		fmt.Printf("Checking for updates...\n")
 		if newVersion := checkForUpdate(); newVersion != "" {
-			promptAndUpdate(newVersion)
+			if promptAndUpdate(newVersion) {
+				// User declined or update failed
+				config.LastUpdateCheck = time.Now().Unix()
+				saveConfig(config)
+			}
 		} else {
 			fmt.Printf("You're up to date (v%s)\n", CurrentVersion)
 		}
@@ -927,14 +931,15 @@ func main() {
 		shouldCheckUpdate(config.LastUpdateCheck, config.UpdateCheckIntervalHrs) {
 
 		if newVersion := checkForUpdate(); newVersion != "" {
-			// Update last check time
-			config.LastUpdateCheck = time.Now().Unix()
-			saveConfig(config)
-
 			// Prompt for update
-			promptAndUpdate(newVersion)
+			if promptAndUpdate(newVersion) {
+				// User declined or update failed, save check time
+				config.LastUpdateCheck = time.Now().Unix()
+				saveConfig(config)
+			}
+			// If update succeeded, program exits in promptAndUpdate
 		} else {
-			// Update last check time even if no update available
+			// No update available, save check time
 			config.LastUpdateCheck = time.Now().Unix()
 			saveConfig(config)
 		}
