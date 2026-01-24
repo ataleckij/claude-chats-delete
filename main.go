@@ -28,13 +28,15 @@ type Config struct {
 
 // Chat represents a single chat session
 type Chat struct {
-	UUID      string
-	Title     string
-	Timestamp string
-	Project   string
-	Version   string
-	Path      string
-	Files     []string // related files for deletion
+	UUID         string
+	Title        string
+	Timestamp    string
+	Project      string
+	Version      string
+	// MessageCount int // TODO: maybe re-enable later
+	LineCount    int
+	Path         string
+	Files        []string // related files for deletion
 }
 
 // JSONLMessage represents a message in the JSONL file
@@ -43,6 +45,7 @@ type JSONLMessage struct {
 	Version string `json:"version"`
 	Slug    string `json:"slug"`
 	IsMeta  bool   `json:"isMeta"`
+	Summary string `json:"summary"`
 	Message struct {
 		Content string `json:"content"`
 	} `json:"message"`
@@ -251,14 +254,16 @@ func (m model) View() string {
 	}
 
 	// Calculate column widths based on terminal width
-	// Fixed: indicator(4) + timestamp(19) + version(8) + gaps(6) = 37
+	// Fixed: indicator(4) + timestamp(19) + version(8) + lines(6) + gaps(8) = 45
 	width := m.width
-	if width < 70 {
-		width = 70 // minimum width
+	if width < 75 {
+		width = 75 // minimum width
 	}
 
 	versionWidth := 8
-	remaining := width - 37
+	// msgWidth := 5 // TODO: maybe re-enable later
+	linesWidth := 6
+	remaining := width - 45
 	titleWidth := remaining * 60 / 100 // 60% for title
 	projectWidth := remaining - titleWidth
 
@@ -281,8 +286,8 @@ func (m model) View() string {
 	s.WriteString("\n\n")
 
 	// Column headers
-	headerFmt := fmt.Sprintf("    %%-19s  %%-%ds  %%-%ds  %%-%ds", versionWidth, titleWidth, projectWidth)
-	header := fmt.Sprintf(headerFmt, "TIMESTAMP", "VERSION", "TITLE", "PROJECT")
+	headerFmt := fmt.Sprintf("    %%-19s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
+	header := fmt.Sprintf(headerFmt, "TIMESTAMP", "VERSION", "LINES", "TITLE", "PROJECT")
 	s.WriteString(dimStyle.Render(header))
 	s.WriteString("\n")
 	s.WriteString(strings.Repeat("─", width))
@@ -306,6 +311,15 @@ func (m model) View() string {
 		// Truncate fields using visual width
 		timestamp := runewidth.Truncate(chat.Timestamp, 19, "")
 		version := runewidth.Truncate(chat.Version, versionWidth-1, "")
+		// TODO: msg column - maybe re-enable later
+		// msg := fmt.Sprintf("%d", chat.MessageCount)
+		// if chat.MessageCount == 0 {
+		// 	msg = "-"
+		// }
+		lines := fmt.Sprintf("%d", chat.LineCount)
+		if chat.LineCount == 0 {
+			lines = "-"
+		}
 		title := runewidth.Truncate(chat.Title, titleWidth-2, "..")
 		project := runewidth.Truncate(chat.Project, projectWidth-2, "..")
 
@@ -315,8 +329,8 @@ func (m model) View() string {
 			indicator = "[✓]"
 		}
 
-		lineFmt := fmt.Sprintf("%%s %%-19s  %%-%ds  %%-%ds  %%-%ds", versionWidth, titleWidth, projectWidth)
-		line := fmt.Sprintf(lineFmt, indicator, timestamp, version, title, project)
+		lineFmt := fmt.Sprintf("%%s %%-19s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
+		line := fmt.Sprintf(lineFmt, indicator, timestamp, version, lines, title, project)
 
 		// Apply styles
 		style := lipgloss.NewStyle()
@@ -446,6 +460,20 @@ func findAllChats() []Chat {
 		}
 
 		projectPath := filepath.Join(projectsDir, entry.Name())
+
+		// TODO: Build a map of UUID -> messageCount from sessions-index.json if it exists
+		// messageCountMap := make(map[string]int)
+		// indexPath := filepath.Join(projectPath, "sessions-index.json")
+		// if data, err := os.ReadFile(indexPath); err == nil {
+		// 	var index SessionsIndex
+		// 	if err := json.Unmarshal(data, &index); err == nil {
+		// 		for _, sessionEntry := range index.Entries {
+		// 			messageCountMap[sessionEntry.SessionID] = sessionEntry.MessageCount
+		// 		}
+		// 	}
+		// }
+
+		// Scan all JSONL files (original behavior)
 		files, err := filepath.Glob(filepath.Join(projectPath, "*.jsonl"))
 		if err != nil {
 			continue
@@ -463,14 +491,20 @@ func findAllChats() []Chat {
 			title := getChatTitle(file)
 			timestamp := getChatTimestamp(file)
 			version := getChatVersion(file)
+			lineCount := countLines(file)
+
+			// TODO: Get messageCount from index if available
+			// msgCount := messageCountMap[uuid]
 
 			chats = append(chats, Chat{
-				UUID:      uuid,
-				Title:     title,
-				Timestamp: timestamp,
-				Project:   entry.Name(),
-				Version:   version,
-				Path:      file,
+				UUID:         uuid,
+				Title:        title,
+				Timestamp:    timestamp,
+				Project:      entry.Name(),
+				Version:      version,
+				// MessageCount: msgCount,
+				LineCount:    lineCount,
+				Path:         file,
 			})
 		}
 	}
@@ -531,6 +565,7 @@ func getChatTitle(jsonlFile string) string {
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
+	var firstSummary string
 
 	for scanner.Scan() {
 		lineNum++
@@ -541,6 +576,11 @@ func getChatTitle(jsonlFile string) string {
 		var msg JSONLMessage
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
 			continue
+		}
+
+		// Save first summary as fallback
+		if msg.Type == "summary" && msg.Summary != "" && firstSummary == "" {
+			firstSummary = msg.Summary
 		}
 
 		// Skip meta messages and find first real user message
@@ -554,9 +594,14 @@ func getChatTitle(jsonlFile string) string {
 		}
 
 		// Stop after checking reasonable number of lines
-		if lineNum > 20 {
+		if lineNum > 100 {
 			break
 		}
+	}
+
+	// Fallback to summary if no user message found
+	if firstSummary != "" {
+		return firstSummary
 	}
 
 	return "[No title]"
@@ -595,6 +640,22 @@ func getChatVersion(jsonlFile string) string {
 	}
 
 	return ""
+}
+
+func countLines(jsonlFile string) int {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+
+	return count
 }
 
 func getSlugFromChat(jsonlFile string) string {

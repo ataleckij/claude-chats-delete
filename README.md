@@ -4,17 +4,17 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code v2.1.7.
+Tested with Claude Code v2.1.17.
 
 <img src="./demo.gif" />
 
 ## Features
 
 - Browse all chat sessions across projects
-- View chat titles, timestamps, versions, and projects
+- View chat titles, timestamps, versions, line counts, and projects
 - Copy chat UUID to clipboard
 - Multiple selection with visual indicators
-- Delete chats with all related files (subagents, file-history, debug, todos, session-env)
+- Delete chats with all related files (subagents, file-history, debug, todos, session-env, plans)
 - Keyboard-driven navigation (vim-style support)
 - Color-coded interface
 - Auto-update on startup (checks GitHub for new releases)
@@ -70,6 +70,8 @@ All related files are deleted:
 - Debug logs (`debug/*.txt`)
 - Todo files (`todos/*.json`)
 - Session environment (`session-env/*/`)
+- Plan files (`plans/*.md`)
+- Entry in `sessions-index.json` (updated automatically)
 
 ## Updates
 
@@ -108,12 +110,14 @@ The tool manages files in `~/.claude/`:
 ~/.claude/
 ├── projects/<project>/
 │   ├── <uuid>.jsonl              # Main chat file
-│   └── <uuid>/                   # Chat directory
-│       └── subagents/            # Subagent conversations
+│   ├── <uuid>/                   # Chat directory
+│   │   └── subagents/            # Subagent conversations
+│   └── sessions-index.json       # Index of chat sessions
 ├── file-history/<uuid>/          # File version history
 ├── debug/<uuid>.txt              # Debug logs
 ├── todos/<uuid>-*.json           # Todo lists
-└── session-env/<uuid>/           # Session environments
+├── session-env/<uuid>/           # Session environments
+└── plans/*.md                    # Plan mode files
 ```
 
 ## License
