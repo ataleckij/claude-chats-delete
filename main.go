@@ -16,6 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+	"github.com/muesli/termenv"
 )
 
 // Config stores application configuration
@@ -85,30 +86,39 @@ var (
 	// Styles
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("86")).
-			MarginBottom(1)
+			Foreground(lipgloss.Color("6"))
 
 	selectedStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("226"))
+			Foreground(adaptiveColor("226", "11"))
 
 	cursorStyle = lipgloss.NewStyle().
 			Reverse(true)
 
 	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(adaptiveColor("240", "8"))
 
 	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196")).
+			Foreground(adaptiveColor("196", "9")).
 			Bold(true)
 
 	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("46")).
+			Foreground(adaptiveColor("46", "10")).
 			Bold(true)
 
 	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
+			Foreground(adaptiveColor("241", "8"))
 )
+
+// adaptiveColor returns a color that adapts to terminal capabilities
+// Uses rich 256-color codes on modern terminals, falls back to basic 16 colors otherwise
+func adaptiveColor(rich string, fallback string) lipgloss.TerminalColor {
+	profile := lipgloss.ColorProfile()
+	if profile == termenv.ANSI {
+		return lipgloss.Color(fallback)
+	}
+	return lipgloss.Color(rich)
+}
 
 type model struct {
 	chats         []Chat
@@ -122,7 +132,8 @@ type model struct {
 	height        int
 	scrollOffset  int
 	copiedMsg     string
-	copyId        int
+	deleteTimer   int // Track active delete message timer
+	copyTimer     int // Track active copy message timer
 }
 
 func initialModel() model {
@@ -192,6 +203,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 			m.scrollOffset = 0
 			m.error = ""
+			m.deleted = 0
+			m.copiedMsg = ""
 
 		case "c":
 			// Copy UUID to clipboard
@@ -200,11 +213,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err := copyToClipboard(uuid); err != nil {
 					m.error = fmt.Sprintf("Failed to copy: %v", err)
 				} else {
-					m.copyId++
-					currentId := m.copyId
+					m.copyTimer++
+					currentTimer := m.copyTimer
 					m.copiedMsg = fmt.Sprintf("Chat UUID copied: %s", uuid)
+					m.error = ""
+					m.deleted = 0
 					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
-						return clearCopiedMsg{id: currentId}
+						return clearCopiedMsg{id: currentTimer}
 					})
 				}
 			}
@@ -213,22 +228,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case deleteCompleteMsg:
 		m.deleting = false
 		m.deleted = msg.count
+		m.deleteTimer++
+		currentTimer := m.deleteTimer
 		m.chats = findAllChats()
 		m.selected = make(map[int]bool)
 		m.cursor = 0
 		m.scrollOffset = 0
 		m.confirmDelete = false
+		// Clear other status messages
+		m.error = ""
+		m.copiedMsg = ""
 		if len(m.chats) == 0 {
 			return m, tea.Quit
 		}
+		return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+			return clearDeleteMsg{id: currentTimer}
+		})
 
 	case errMsg:
 		m.deleting = false
 		m.error = string(msg)
 
 	case clearCopiedMsg:
-		if msg.id == m.copyId {
+		if msg.id == m.copyTimer {
 			m.copiedMsg = ""
+		}
+
+	case clearDeleteMsg:
+		if msg.id == m.deleteTimer {
+			m.deleted = 0
 		}
 	}
 
@@ -237,6 +265,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) adjustScroll() {
 	visibleHeight := m.height - 8 // Account for header/footer
+	// confirmDelete dialog replaces help text, no additional space needed
 	if visibleHeight < 1 {
 		visibleHeight = 10
 	}
@@ -283,7 +312,7 @@ func (m model) View() string {
 	// Stats
 	stats := fmt.Sprintf("Total: %d | Selected: %d", len(m.chats), len(m.selected))
 	s.WriteString(dimStyle.Render(stats))
-	s.WriteString("\n\n")
+	s.WriteString("\n")
 
 	// Column headers
 	headerFmt := fmt.Sprintf("    %%-19s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
@@ -295,6 +324,7 @@ func (m model) View() string {
 
 	// Chat list
 	visibleHeight := m.height - 8
+	// confirmDelete dialog replaces help text, no additional space needed
 	if visibleHeight < 1 {
 		visibleHeight = 10
 	}
@@ -320,8 +350,18 @@ func (m model) View() string {
 		if chat.LineCount == 0 {
 			lines = "-"
 		}
-		title := runewidth.Truncate(chat.Title, titleWidth-2, "..")
-		project := runewidth.Truncate(chat.Project, projectWidth-2, "..")
+
+		// Clean title from newlines
+		titleCleaned := strings.ReplaceAll(chat.Title, "\n", " ")
+		titleCleaned = strings.ReplaceAll(titleCleaned, "\r", "")
+		titleCleaned = strings.Join(strings.Fields(titleCleaned), " ")
+		title := runewidth.Truncate(titleCleaned, titleWidth-2, "..")
+
+		// Clean project from newlines
+		projectCleaned := strings.ReplaceAll(chat.Project, "\n", " ")
+		projectCleaned = strings.ReplaceAll(projectCleaned, "\r", "")
+		projectCleaned = strings.Join(strings.Fields(projectCleaned), " ")
+		project := runewidth.Truncate(projectCleaned, projectWidth-2, "..")
 
 		// Selection indicator
 		indicator := "[ ]"
@@ -347,29 +387,25 @@ func (m model) View() string {
 
 	// Scroll indicator
 	if len(m.chats) > visibleHeight {
-		s.WriteString("\n")
 		scrollInfo := fmt.Sprintf("[%d-%d/%d]", start+1, end, len(m.chats))
 		s.WriteString(dimStyle.Render(scrollInfo))
+		s.WriteString("\n")
 	}
 
 	// Status messages
-	s.WriteString("\n\n")
 	if m.error != "" {
 		s.WriteString(errorStyle.Render("Error: " + m.error))
 		s.WriteString("\n")
-	}
-	if m.deleted > 0 {
+	} else if m.deleted > 0 {
 		s.WriteString(successStyle.Render(fmt.Sprintf("✓ Deleted %d chat(s)", m.deleted)))
 		s.WriteString("\n")
-	}
-	if m.copiedMsg != "" {
+	} else if m.copiedMsg != "" {
 		s.WriteString(successStyle.Render("✓ " + m.copiedMsg))
 		s.WriteString("\n")
 	}
 
 	// Confirmation dialog
 	if m.confirmDelete {
-		s.WriteString("\n")
 		s.WriteString(errorStyle.Render(fmt.Sprintf("Delete %d chat(s)?", len(m.selected))))
 		s.WriteString(" ")
 		s.WriteString(helpStyle.Render("[ENTER=Yes] [ESC=No]"))
@@ -378,6 +414,7 @@ func (m model) View() string {
 		// Help
 		help := "↑/↓:Navigate | SPACE:Select/Deselect | C:Copy UUID | D:Delete | R:Refresh | Q:Quit"
 		s.WriteString(helpStyle.Render(help))
+		s.WriteString("\n")
 	}
 
 	return s.String()
@@ -391,6 +428,10 @@ type deleteCompleteMsg struct {
 type errMsg string
 
 type clearCopiedMsg struct {
+	id int
+}
+
+type clearDeleteMsg struct {
 	id int
 }
 
@@ -547,6 +588,13 @@ func cleanSystemTags(content string) string {
 
 	// Trim whitespace and newlines
 	cleaned = strings.TrimSpace(cleaned)
+
+	// Remove ALL newline characters from content
+	cleaned = strings.ReplaceAll(cleaned, "\n", " ")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+
+	// Remove multiple spaces
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
 
 	// If content is empty or only contains tags/whitespace, return empty
 	if cleaned == "" || strings.HasPrefix(cleaned, "<") {
