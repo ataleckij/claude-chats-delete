@@ -752,6 +752,13 @@ func findRelatedFiles(uuid string) []string {
 		if _, err := os.Stat(subagentsDir); err == nil {
 			files = append(files, subagentsDir)
 		}
+
+		// Tool results directory (within chat directory)
+		chatDir := strings.TrimSuffix(m, ".jsonl")
+		toolResultsDir := filepath.Join(chatDir, "tool-results")
+		if _, err := os.Stat(toolResultsDir); err == nil {
+			files = append(files, toolResultsDir)
+		}
 	}
 
 	// Plan file (via slug)

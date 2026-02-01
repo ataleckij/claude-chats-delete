@@ -4,7 +4,7 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code v2.1.17.
+Tested with Claude Code v2.1.29 (f298d94).
 
 <img src="./demo.gif" />
 
@@ -14,7 +14,7 @@ Tested with Claude Code v2.1.17.
 - View chat titles, timestamps, versions, line counts, and projects
 - Copy chat UUID to clipboard
 - Multiple selection with visual indicators
-- Delete chats with all related files (subagents, file-history, debug, todos, session-env, plans)
+- Delete chats with all related files (subagents, tool-results, file-history, debug, todos, session-env, plans)
 - Keyboard-driven navigation (vim-style support)
 - Color-coded interface
 - Auto-update on startup (checks GitHub for new releases)
@@ -66,6 +66,7 @@ When you press `d`:
 All related files are deleted:
 - Main chat file (`.jsonl`)
 - Subagents directory (`<uuid>/subagents/`)
+- Tool results directory (`<uuid>/tool-results/`)
 - File history (`file-history/<uuid>/`)
 - Debug logs (`debug/*.txt`)
 - Todo files (`todos/*.json`)
@@ -111,7 +112,8 @@ The tool manages files in `~/.claude/`:
 ├── projects/<project>/
 │   ├── <uuid>.jsonl              # Main chat file
 │   ├── <uuid>/                   # Chat directory
-│   │   └── subagents/            # Subagent conversations
+│   │   ├── subagents/            # Subagent conversations
+│   │   └── tool-results/         # Tool execution results
 │   └── sessions-index.json       # Index of chat sessions
 ├── file-history/<uuid>/          # File version history
 ├── debug/<uuid>.txt              # Debug logs
