@@ -191,6 +191,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected[m.cursor] = true
 			}
 
+		case "a":
+			if len(m.selected) == len(m.chats) {
+				m.selected = make(map[int]bool)
+			} else {
+				for i := range m.chats {
+					m.selected[i] = true
+				}
+			}
+
 		case "d":
 			if len(m.selected) > 0 {
 				m.confirmDelete = true
@@ -412,7 +421,7 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		// Help
-		help := "↑/↓:Navigate | SPACE:Select/Deselect | C:Copy UUID | D:Delete | R:Refresh | Q:Quit"
+		help := "↑/↓:Navigate | SPACE:Select/Deselect | A:Select/Deselect All | C:Copy UUID | D:Delete | R:Refresh | Q:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}

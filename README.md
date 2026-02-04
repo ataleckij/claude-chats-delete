@@ -54,6 +54,7 @@ claude-chats
 | `c` | Copy chat UUID to clipboard |
 | `d` | Delete selected chats (with confirmation) |
 | `r` | Refresh chat list |
+| `a` | Select/deselect all chats |
 | `q` or `Ctrl+C` | Quit |
 
 ### Deletion Confirmation
