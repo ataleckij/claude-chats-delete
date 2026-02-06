@@ -192,6 +192,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "a":
+			// Select all / deselect all toggle
+			if len(m.chats) == 0 {
+				return m, nil // Nothing to select
+			}
 			if len(m.selected) == len(m.chats) {
 				m.selected = make(map[int]bool)
 			} else {
@@ -421,7 +425,7 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		// Help
-		help := "↑/↓:Navigate | SPACE:Select/Deselect | A:Select/Deselect All | C:Copy UUID | D:Delete | R:Refresh | Q:Quit"
+		help := "↑/↓:Nav | SPACE:Toggle (A:All) | C:Copy ID | D:Delete | R:Refresh UI | Q:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}
