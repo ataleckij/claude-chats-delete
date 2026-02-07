@@ -8,11 +8,12 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const (
-	CurrentVersion = "0.2.0"
+	CurrentVersion = "0.2.1"
 	GitHubAPIURL   = "https://api.github.com/repos/ataleckij/claude-chats-delete/releases/latest"
 )
 
@@ -101,13 +102,26 @@ func promptAndUpdate(newVersion string) bool {
 		if err := downloadAndInstall(newVersion); err != nil {
 			fmt.Printf("Update failed: %v\n", err)
 			fmt.Println("Please update manually:")
-			fmt.Printf("  https://github.com/ataleckij/claude-chats-delete/releases/tag/v%s\n\n", newVersion)
+			fmt.Println("  curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/install.sh | sh\n")
 			time.Sleep(2 * time.Second)
 			return true // Update failed, remember check time
 		} else {
-			fmt.Println("\n✓ Update successful!")
-			fmt.Println("Please restart claude-chats to use the new version.\n")
-			os.Exit(0)
+			fmt.Println("\n✓ Update successful! Restarting...\n")
+
+			// Get current executable path
+			exePath, err := os.Executable()
+			if err != nil {
+				fmt.Println("Failed to get executable path, please restart manually")
+				os.Exit(0)
+			}
+
+			// Replace current process with new version (automatic restart)
+			// This preserves PID and doesn't require manual restart
+			if err := syscall.Exec(exePath, os.Args, os.Environ()); err != nil {
+				fmt.Printf("Failed to restart automatically: %v\n", err)
+				fmt.Println("Please restart claude-chats manually to use the new version.\n")
+				os.Exit(0)
+			}
 		}
 	}
 
@@ -168,11 +182,20 @@ func downloadAndInstall(version string) error {
 		return fmt.Errorf("failed to backup current binary: %w", err)
 	}
 
-	// Copy new binary to executable location
-	if err := copyFile(tmpPath, exePath); err != nil {
-		// Restore backup on failure
-		copyFile(backupPath, exePath)
-		return fmt.Errorf("failed to install new binary: %w", err)
+	// Try atomic rename first (works for same-device and avoids "text file busy")
+	if err := os.Rename(tmpPath, exePath); err != nil {
+		// Rename failed (likely cross-device link), try remove + copy approach
+		// In Linux, we can remove a running executable - process continues until exit
+		if removeErr := os.Remove(exePath); removeErr != nil {
+			copyFile(backupPath, exePath)
+			return fmt.Errorf("failed to remove old binary: %w", removeErr)
+		}
+
+		// Copy new binary to destination
+		if copyErr := copyFile(tmpPath, exePath); copyErr != nil {
+			copyFile(backupPath, exePath)
+			return fmt.Errorf("failed to install new binary: %w", copyErr)
+		}
 	}
 
 	// Remove backup
