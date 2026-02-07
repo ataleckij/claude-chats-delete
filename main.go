@@ -82,6 +82,7 @@ var (
 	sessionDir     string
 	fileHistoryDir string
 	plansDir       string
+	agentsDir      string
 
 	// Styles
 	titleStyle = lipgloss.NewStyle().
@@ -855,7 +856,51 @@ func findRelatedFiles(uuid string) []string {
 		files = append(files, fileHistoryPath)
 	}
 
+	// Agent memory files (v2.1.33+)
+	// Parse agent IDs from chat JSONL and delete local scope memory
+	if chatJSONLPath != "" {
+		agentIDs := parseAgentIDs(chatJSONLPath)
+		for _, agentID := range agentIDs {
+			// Delete local scope memory (always tied to this chat session)
+			localMemory := filepath.Join(agentsDir, agentID, "memory-local.md")
+			if _, err := os.Stat(localMemory); err == nil {
+				files = append(files, localMemory)
+			}
+
+			// Note: We don't delete memory-project.md or memory-user.md as they may be
+			// shared across multiple chats. Consider implementing reference counting
+			// in a future version if needed.
+		}
+	}
+
 	return files
+}
+
+// parseAgentIDs extracts agent IDs from chat JSONL file
+func parseAgentIDs(chatFile string) []string {
+	var agentIDs []string
+	seen := make(map[string]bool)
+
+	file, err := os.Open(chatFile)
+	if err != nil {
+		return agentIDs
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		var msg struct {
+			AgentID string `json:"agent_id"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err == nil {
+			if msg.AgentID != "" && !seen[msg.AgentID] {
+				agentIDs = append(agentIDs, msg.AgentID)
+				seen[msg.AgentID] = true
+			}
+		}
+	}
+
+	return agentIDs
 }
 
 // Config management
@@ -924,6 +969,7 @@ func initializePaths(dir string) {
 	sessionDir = filepath.Join(claudeDir, "session-env")
 	fileHistoryDir = filepath.Join(claudeDir, "file-history")
 	plansDir = filepath.Join(claudeDir, "plans")
+	agentsDir = filepath.Join(claudeDir, "agents")
 }
 
 func main() {

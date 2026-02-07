@@ -4,7 +4,7 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code v2.1.29 (f298d94).
+Tested with Claude Code v2.1.34.
 
 <img src="./demo.gif" />
 
@@ -68,6 +68,7 @@ All related files are deleted:
 - Main chat file (`.jsonl`)
 - Subagents directory (`<uuid>/subagents/`)
 - Tool results directory (`<uuid>/tool-results/`)
+- Agent memory (`agents/<agent-id>/memory-local.md`)
 - File history (`file-history/<uuid>/`)
 - Debug logs (`debug/*.txt`)
 - Todo files (`todos/*.json`)
@@ -120,8 +121,14 @@ The tool manages files in `~/.claude/`:
 ├── debug/<uuid>.txt              # Debug logs
 ├── todos/<uuid>-*.json           # Todo lists
 ├── session-env/<uuid>/           # Session environments
-└── plans/*.md                    # Plan mode files
+├── plans/*.md                    # Plan mode files
+└── agents/<agent-id>/            # Agent memory (v2.1.33+)
+    ├── memory-local.md           # Session-specific memory (deleted)
+    ├── memory-project.md         # Project memory (preserved)
+    └── memory-user.md            # Global memory (preserved)
 ```
+
+**Note:** Only `memory-local.md` files are deleted when removing chats. Project and user scope memories are preserved as they may be shared across multiple sessions.
 
 ## License
 
