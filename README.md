@@ -2,6 +2,8 @@
 
 **Delete and remove Claude Code chat sessions** with an interactive terminal UI.
 
+[YouTube Presentation](https://youtu.be/FFmKh5kCyuE) for [BridgeMind Vibeathon](https://www.bridgemind.ai/vibeathon)
+
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
 Tested with Claude Code v2.1.42.
