@@ -29,15 +29,15 @@ type Config struct {
 
 // Chat represents a single chat session
 type Chat struct {
-	UUID         string
-	Title        string
-	Timestamp    string
-	Project      string
-	Version      string
+	UUID      string
+	Title     string
+	Timestamp string
+	Project   string
+	Version   string
 	// MessageCount int // TODO: maybe re-enable later
-	LineCount    int
-	Path         string
-	Files        []string // related files for deletion
+	LineCount int
+	Path      string
+	Files     []string // related files for deletion
 }
 
 // JSONLMessage represents a message in the JSONL file
@@ -184,6 +184,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m.adjustScroll()
 			}
+
+		case "pgdown", "ctrl+f":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor += visibleHeight
+			if m.cursor >= len(m.chats) {
+				m.cursor = len(m.chats) - 1
+			}
+			m.adjustScroll()
+
+		case "pgup", "ctrl+b":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor -= visibleHeight
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.adjustScroll()
+
+		case "home", "g":
+			m.cursor = 0
+			m.adjustScroll()
+
+		case "end", "G":
+			if len(m.chats) > 0 {
+				m.cursor = len(m.chats) - 1
+			}
+			m.adjustScroll()
+
+		case "ctrl+d":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor += visibleHeight / 2
+			if m.cursor >= len(m.chats) {
+				m.cursor = len(m.chats) - 1
+			}
+			m.adjustScroll()
+
+		case "ctrl+u":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor -= visibleHeight / 2
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.adjustScroll()
 
 		case " ":
 			if m.selected[m.cursor] {
@@ -426,7 +480,7 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		// Help
-		help := "↑/↓:Nav | SPACE:Toggle (A:All) | C:Copy ID | D:Delete | R:Refresh UI | Q:Quit"
+		help := "↑/↓/PgUp/PgDn:Nav | Home/End:Jump | Ctrl+U/D:Half | SPACE:Toggle (A:All) | C:Copy ID | D:Delete | R:Refresh UI | Q:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}
@@ -552,14 +606,14 @@ func findAllChats() []Chat {
 			// msgCount := messageCountMap[uuid]
 
 			chats = append(chats, Chat{
-				UUID:         uuid,
-				Title:        title,
-				Timestamp:    timestamp,
-				Project:      entry.Name(),
-				Version:      version,
+				UUID:      uuid,
+				Title:     title,
+				Timestamp: timestamp,
+				Project:   entry.Name(),
+				Version:   version,
 				// MessageCount: msgCount,
-				LineCount:    lineCount,
-				Path:         file,
+				LineCount: lineCount,
+				Path:      file,
 			})
 		}
 	}
@@ -1004,8 +1058,8 @@ func main() {
 		// Save config with defaults
 		config = &Config{
 			ClaudeDir:              dir,
-			AutoUpdates:            true,  // Enable by default
-			UpdateCheckIntervalHrs: 1,     // Check every hour
+			AutoUpdates:            true, // Enable by default
+			UpdateCheckIntervalHrs: 1,    // Check every hour
 			LastUpdateCheck:        0,
 		}
 		if err := saveConfig(config); err != nil {

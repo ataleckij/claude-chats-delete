@@ -17,7 +17,7 @@ Tested with Claude Code v2.1.42.
 - Copy chat UUID to clipboard
 - Multiple selection with visual indicators
 - Delete chats with all related files (subagents, tool-results, file-history, debug, todos, session-env, plans)
-- Keyboard-driven navigation (vim-style support)
+- Keyboard-driven navigation (vim-style support with fast page scrolling)
 - Color-coded interface
 - Auto-update on startup (checks GitHub for new releases)
 
@@ -49,15 +49,26 @@ claude-chats
 
 ### Keyboard Controls
 
+#### Navigation
 | Key | Action |
 |-----|--------|
-| `↑/↓` or `k/j` | Navigate up/down |
+| `↑/↓` or `k/j` | Navigate up/down (single item) |
+| `PgUp/PgDn` or `Ctrl+B/F` | Page up/down (fast scroll) |
+| `Ctrl+U/D` | Half page up/down (vim-style) |
+| `Home` or `g` | Jump to first chat |
+| `End` or `G` | Jump to last chat |
+
+#### Actions
+| Key | Action |
+|-----|--------|
 | `SPACE` | Select/deselect current chat |
+| `a` | Select/deselect all chats |
 | `c` | Copy chat UUID to clipboard |
 | `d` | Delete selected chats (with confirmation) |
 | `r` | Refresh chat list |
-| `a` | Select/deselect all chats |
 | `q` or `Ctrl+C` | Quit |
+
+> **Tip for Power Users:** Working with hundreds of chats? See [Keyboard Shortcuts Guide](docs/keyboard-shortcuts.md) for advanced navigation tips and vim-style commands.
 
 ### Deletion Confirmation
 
