@@ -29,15 +29,15 @@ type Config struct {
 
 // Chat represents a single chat session
 type Chat struct {
-	UUID         string
-	Title        string
-	Timestamp    string
-	Project      string
-	Version      string
+	UUID      string
+	Title     string
+	Timestamp string
+	Project   string
+	Version   string
 	// MessageCount int // TODO: maybe re-enable later
-	LineCount    int
-	Path         string
-	Files        []string // related files for deletion
+	LineCount int
+	Path      string
+	Files     []string // related files for deletion
 }
 
 // JSONLMessage represents a message in the JSONL file
@@ -170,7 +170,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Normal mode
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 
 		case "up", "k":
@@ -184,6 +184,60 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 				m.adjustScroll()
 			}
+
+		case "f", "pgdown":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor += visibleHeight
+			if m.cursor >= len(m.chats) {
+				m.cursor = len(m.chats) - 1
+			}
+			m.adjustScroll()
+
+		case "b", "pgup":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor -= visibleHeight
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.adjustScroll()
+
+		case "F":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor += visibleHeight / 2
+			if m.cursor >= len(m.chats) {
+				m.cursor = len(m.chats) - 1
+			}
+			m.adjustScroll()
+
+		case "B":
+			visibleHeight := m.height - 8
+			if visibleHeight < 1 {
+				visibleHeight = 10
+			}
+			m.cursor -= visibleHeight / 2
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+			m.adjustScroll()
+
+		case "g", "home":
+			m.cursor = 0
+			m.adjustScroll()
+
+		case "G", "end":
+			if len(m.chats) > 0 {
+				m.cursor = len(m.chats) - 1
+			}
+			m.adjustScroll()
 
 		case " ":
 			if m.selected[m.cursor] {
@@ -426,7 +480,7 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		// Help
-		help := "↑/↓:Nav | SPACE:Toggle (A:All) | C:Copy ID | D:Delete | R:Refresh UI | Q:Quit"
+		help := "↑/↓:Nav | <Space>:Toggle (a:All) | c:Copy ID | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}
@@ -552,14 +606,14 @@ func findAllChats() []Chat {
 			// msgCount := messageCountMap[uuid]
 
 			chats = append(chats, Chat{
-				UUID:         uuid,
-				Title:        title,
-				Timestamp:    timestamp,
-				Project:      entry.Name(),
-				Version:      version,
+				UUID:      uuid,
+				Title:     title,
+				Timestamp: timestamp,
+				Project:   entry.Name(),
+				Version:   version,
 				// MessageCount: msgCount,
-				LineCount:    lineCount,
-				Path:         file,
+				LineCount: lineCount,
+				Path:      file,
 			})
 		}
 	}
@@ -1004,8 +1058,8 @@ func main() {
 		// Save config with defaults
 		config = &Config{
 			ClaudeDir:              dir,
-			AutoUpdates:            true,  // Enable by default
-			UpdateCheckIntervalHrs: 1,     // Check every hour
+			AutoUpdates:            true, // Enable by default
+			UpdateCheckIntervalHrs: 1,    // Check every hour
 			LastUpdateCheck:        0,
 		}
 		if err := saveConfig(config); err != nil {
