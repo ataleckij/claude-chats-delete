@@ -52,11 +52,13 @@ claude-chats
 #### Navigation
 | Key | Action |
 |-----|--------|
-| `↑/↓` or `k/j` | Navigate up/down (single item) |
-| `PgUp/PgDn` or `Ctrl+B/F` | Page up/down (fast scroll) |
-| `Ctrl+U/D` | Half page up/down (vim-style) |
-| `Home` or `g` | Jump to first chat |
-| `End` or `G` | Jump to last chat |
+| `↑/↓` or `k/j` | Navigate up/down |
+| `f` or `PgDn` | Page down |
+| `b` or `PgUp` | Page up |
+| `F` | Half page down |
+| `B` | Half page up |
+| `g` or `Home` | Jump to first chat |
+| `G` or `End` | Jump to last chat |
 
 #### Actions
 | Key | Action |
@@ -68,7 +70,7 @@ claude-chats
 | `r` | Refresh chat list |
 | `q` or `Ctrl+C` | Quit |
 
-> **Tip for Power Users:** Working with hundreds of chats? See [Keyboard Shortcuts Guide](docs/keyboard-shortcuts.md) for advanced navigation tips and vim-style commands.
+> **Tip for Power Users:** Working with hundreds of chats? See [Keyboard Shortcuts Guide](docs/keyboard-shortcuts.md) for advanced navigation tips.
 
 ### Deletion Confirmation
 

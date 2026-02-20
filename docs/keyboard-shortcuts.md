@@ -8,21 +8,21 @@ Complete reference for all keyboard shortcuts in Claude Code Chat Manager.
 - **`↑` (Up Arrow)** or **`k`** - Move cursor up one item
 - **`↓` (Down Arrow)** or **`j`** - Move cursor down one item
 
-### Fast Scrolling (NEW)
-For users with large chat histories (hundreds of sessions), these shortcuts provide faster navigation:
+### Fast Scrolling
+For users with large chat histories (hundreds of sessions):
 
-- **`PgUp` (Page Up)** or **`Ctrl+B`** - Scroll up by one page (visible height)
-- **`PgDn` (Page Down)** or **`Ctrl+F`** - Scroll down by one page (visible height)
-- **`Ctrl+U`** - Scroll up by half page (vim-style)
-- **`Ctrl+D`** - Scroll down by half page (vim-style)
+- **`f`** or **`PgDn`** - Scroll down by one page
+- **`b`** or **`PgUp`** - Scroll up by one page
+- **`F`** - Scroll down by half page
+- **`B`** - Scroll up by half page
 
 ### Jump Navigation
-- **`Home`** or **`g`** - Jump to first chat (top of list)
-- **`End`** or **`G`** - Jump to last chat (bottom of list)
+- **`g`** or **`Home`** - Jump to first chat (top of list)
+- **`G`** or **`End`** - Jump to last chat (bottom of list)
 
 ## Selection Commands
 
-- **`SPACE`** - Toggle selection for current chat
+- **`<Space>`** - Toggle selection for current chat
 - **`a`** - Toggle select/deselect all chats
 
 ## Action Commands
@@ -45,25 +45,24 @@ When deleting (after pressing `d`):
 If you have hundreds of chat sessions:
 
 1. **Quick Jump to Recent/Old Chats**
-   - Press `Home` or `g` to jump to newest chats
-   - Press `End` or `G` to jump to oldest chats
+   - Press `g` to jump to first chat
+   - Press `G` to jump to last chat
 
 2. **Fast Scanning**
-   - Use `PgDn`/`PgUp` to quickly scan through pages
-   - Use `Ctrl+D`/`Ctrl+U` for more precise half-page movements
+   - Use `f`/`b` to quickly scan through pages
+   - Use `F`/`B` for half-page movements
 
 3. **Bulk Selection Workflow**
-   - Press `Home` to start at top
-   - Use `PgDn` + `SPACE` to select chats as you scroll
-   - Press `a` to select all remaining chats
+   - Press `a` to select all chats
+   - Use `<Space>` to deselect individual chats you want to keep
    - Press `d` to delete selection
 
 ### Vim Users
 
 All standard vim navigation keys are supported:
 - `j`/`k` - Line movement
-- `Ctrl+D`/`Ctrl+U` - Half page scroll
-- `Ctrl+F`/`Ctrl+B` - Full page scroll
+- `f`/`b` - Full page scroll
+- `F`/`B` - Half page scroll
 - `g`/`G` - Jump to top/bottom
 
 ## Scroll Indicator

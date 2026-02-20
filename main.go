@@ -170,7 +170,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Normal mode
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
 
 		case "up", "k":
@@ -185,7 +185,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.adjustScroll()
 			}
 
-		case "pgdown", "ctrl+f":
+		case "f", "pgdown":
 			visibleHeight := m.height - 8
 			if visibleHeight < 1 {
 				visibleHeight = 10
@@ -196,7 +196,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.adjustScroll()
 
-		case "pgup", "ctrl+b":
+		case "b", "pgup":
 			visibleHeight := m.height - 8
 			if visibleHeight < 1 {
 				visibleHeight = 10
@@ -207,17 +207,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.adjustScroll()
 
-		case "home", "g":
-			m.cursor = 0
-			m.adjustScroll()
-
-		case "end", "G":
-			if len(m.chats) > 0 {
-				m.cursor = len(m.chats) - 1
-			}
-			m.adjustScroll()
-
-		case "ctrl+d":
+		case "F":
 			visibleHeight := m.height - 8
 			if visibleHeight < 1 {
 				visibleHeight = 10
@@ -228,7 +218,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.adjustScroll()
 
-		case "ctrl+u":
+		case "B":
 			visibleHeight := m.height - 8
 			if visibleHeight < 1 {
 				visibleHeight = 10
@@ -236,6 +226,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor -= visibleHeight / 2
 			if m.cursor < 0 {
 				m.cursor = 0
+			}
+			m.adjustScroll()
+
+		case "g", "home":
+			m.cursor = 0
+			m.adjustScroll()
+
+		case "G", "end":
+			if len(m.chats) > 0 {
+				m.cursor = len(m.chats) - 1
 			}
 			m.adjustScroll()
 
@@ -480,7 +480,7 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		// Help
-		help := "↑/↓/PgUp/PgDn:Nav | Home/End:Jump | Ctrl+U/D:Half | SPACE:Toggle (A:All) | C:Copy ID | D:Delete | R:Refresh UI | Q:Quit"
+		help := "↑/↓:Nav | <Space>:Toggle (a:All) | c:Copy ID | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}
