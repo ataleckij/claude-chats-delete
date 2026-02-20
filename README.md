@@ -134,4 +134,4 @@ The tool manages files in `~/.claude/`:
 
 ## License
 
-MIT
+[MIT](LICENSE)
