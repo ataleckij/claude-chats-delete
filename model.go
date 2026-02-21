@@ -2,9 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
 
@@ -355,16 +352,10 @@ func (m model) View() string {
 			lines = "-"
 		}
 
-		// Clean title from newlines
-		titleCleaned := strings.ReplaceAll(chat.Title, "\n", " ")
-		titleCleaned = strings.ReplaceAll(titleCleaned, "\r", "")
-		titleCleaned = strings.Join(strings.Fields(titleCleaned), " ")
+		titleCleaned := chat.Title
 		title := runewidth.Truncate(titleCleaned, titleWidth-2, "..")
 
-		// Clean project from newlines
-		projectCleaned := strings.ReplaceAll(chat.Project, "\n", " ")
-		projectCleaned = strings.ReplaceAll(projectCleaned, "\r", "")
-		projectCleaned = strings.Join(strings.Fields(projectCleaned), " ")
+		projectCleaned := chat.Project
 		project := runewidth.Truncate(projectCleaned, projectWidth-2, "..")
 
 		// Selection indicator
@@ -424,51 +415,17 @@ func (m model) View() string {
 	return s.String()
 }
 
-func copyToClipboard(text string) error {
-	var cmd *exec.Cmd
-
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "linux":
-		// Try xclip first, then xsel
-		if _, err := exec.LookPath("xclip"); err == nil {
-			cmd = exec.Command("xclip", "-selection", "clipboard")
-		} else if _, err := exec.LookPath("xsel"); err == nil {
-			cmd = exec.Command("xsel", "--clipboard", "--input")
-		} else if _, err := exec.LookPath("wl-copy"); err == nil {
-			cmd = exec.Command("wl-copy")
-		} else {
-			return fmt.Errorf("no clipboard utility found (install xclip, xsel, or wl-copy)")
-		}
-	default:
-		return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
-	}
-
-	cmd.Stdin = strings.NewReader(text)
-	return cmd.Run()
-}
-
 func (m model) deleteSelectedChats() tea.Cmd {
 	return func() tea.Msg {
-		count := 0
+		var toDelete []Chat
 		for idx := range m.selected {
 			if idx < len(m.chats) {
-				chat := m.chats[idx]
-				files := findRelatedFiles(chat.UUID)
-				for _, file := range files {
-					if err := os.RemoveAll(file); err != nil {
-						return errMsg(fmt.Sprintf("Failed to delete %s: %v", file, err))
-					}
-				}
-
-				// Update sessions-index.json
-				if err := updateSessionsIndex(chat.UUID); err != nil {
-					return errMsg(fmt.Sprintf("Failed to update index: %v", err))
-				}
-
-				count++
+				toDelete = append(toDelete, m.chats[idx])
 			}
+		}
+		count, err := deleteChats(toDelete)
+		if err != nil {
+			return errMsg(err.Error())
 		}
 		return deleteCompleteMsg{count: count}
 	}

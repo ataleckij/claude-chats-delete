@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -419,4 +420,23 @@ func parseAgentIDs(chatFile string) []string {
 	}
 
 	return agentIDs
+}
+
+// deleteChats deletes all files related to the given chats and updates sessions index.
+// Returns count of deleted chats or an error.
+func deleteChats(chats []Chat) (int, error) {
+	count := 0
+	for _, chat := range chats {
+		files := findRelatedFiles(chat.UUID)
+		for _, file := range files {
+			if err := os.RemoveAll(file); err != nil {
+				return 0, fmt.Errorf("failed to delete %s: %w", file, err)
+			}
+		}
+		if err := updateSessionsIndex(chat.UUID); err != nil {
+			return 0, fmt.Errorf("failed to update index: %w", err)
+		}
+		count++
+	}
+	return count, nil
 }

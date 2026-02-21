@@ -102,11 +102,11 @@ func promptAndUpdate(newVersion string) bool {
 		if err := downloadAndInstall(newVersion); err != nil {
 			fmt.Printf("Update failed: %v\n", err)
 			fmt.Println("Please update manually:")
-			fmt.Println("  curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/install.sh | sh\n")
+			fmt.Println("  curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/install.sh | sh")
 			time.Sleep(2 * time.Second)
 			return true // Update failed, remember check time
 		} else {
-			fmt.Println("\n✓ Update successful! Restarting...\n")
+			fmt.Println("✓ Update successful! Restarting...")
 
 			// Get current executable path
 			exePath, err := os.Executable()
@@ -119,7 +119,7 @@ func promptAndUpdate(newVersion string) bool {
 			// This preserves PID and doesn't require manual restart
 			if err := syscall.Exec(exePath, os.Args, os.Environ()); err != nil {
 				fmt.Printf("Failed to restart automatically: %v\n", err)
-				fmt.Println("Please restart claude-chats manually to use the new version.\n")
+				fmt.Println("Please restart claude-chats manually to use the new version.")
 				os.Exit(0)
 			}
 		}
