@@ -106,7 +106,7 @@ func promptAndUpdate(newVersion string) bool {
 			time.Sleep(2 * time.Second)
 			return true // Update failed, remember check time
 		} else {
-			fmt.Println("✓ Update successful! Restarting...")
+			fmt.Println("\n✓ Update successful! Restarting...")
 
 			// Get current executable path
 			exePath, err := os.Executable()
