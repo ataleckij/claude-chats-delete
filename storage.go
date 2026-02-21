@@ -1,0 +1,422 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+func findAllChats() []Chat {
+	var chats []Chat
+
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return chats
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		projectPath := filepath.Join(projectsDir, entry.Name())
+
+		// TODO: Build a map of UUID -> messageCount from sessions-index.json if it exists
+		// messageCountMap := make(map[string]int)
+		// indexPath := filepath.Join(projectPath, "sessions-index.json")
+		// if data, err := os.ReadFile(indexPath); err == nil {
+		// 	var index SessionsIndex
+		// 	if err := json.Unmarshal(data, &index); err == nil {
+		// 		for _, sessionEntry := range index.Entries {
+		// 			messageCountMap[sessionEntry.SessionID] = sessionEntry.MessageCount
+		// 		}
+		// 	}
+		// }
+
+		// Scan all JSONL files (original behavior)
+		files, err := filepath.Glob(filepath.Join(projectPath, "*.jsonl"))
+		if err != nil {
+			continue
+		}
+
+		for _, file := range files {
+			basename := filepath.Base(file)
+			uuid := strings.TrimSuffix(basename, ".jsonl")
+
+			// Skip agent files
+			if strings.HasPrefix(uuid, "agent-") {
+				continue
+			}
+
+			title := getChatTitle(file)
+			timestamp := getChatTimestamp(file)
+			version := getChatVersion(file)
+			lineCount := countLines(file)
+
+			// TODO: Get messageCount from index if available
+			// msgCount := messageCountMap[uuid]
+
+			chats = append(chats, Chat{
+				UUID:      uuid,
+				Title:     title,
+				Timestamp: timestamp,
+				Project:   entry.Name(),
+				Version:   version,
+				// MessageCount: msgCount,
+				LineCount: lineCount,
+				Path:      file,
+			})
+		}
+	}
+
+	// Sort by timestamp (newest first)
+	sort.Slice(chats, func(i, j int) bool {
+		return chats[i].Timestamp > chats[j].Timestamp
+	})
+
+	return chats
+}
+
+func cleanSystemTags(content string) string {
+	// Remove content within system tags (including the tags themselves)
+	systemTagPairs := [][2]string{
+		{"<local-command-caveat>", "</local-command-caveat>"},
+		{"<command-name>", "</command-name>"},
+		{"<command-message>", "</command-message>"},
+		{"<command-args>", "</command-args>"},
+		{"<local-command-stdout>", "</local-command-stdout>"},
+		{"<system-reminder>", "</system-reminder>"},
+	}
+
+	cleaned := content
+	for _, pair := range systemTagPairs {
+		start := strings.Index(cleaned, pair[0])
+		for start >= 0 {
+			end := strings.Index(cleaned[start:], pair[1])
+			if end >= 0 {
+				end += start + len(pair[1])
+				cleaned = cleaned[:start] + cleaned[end:]
+			} else {
+				// No closing tag, remove from start tag onwards
+				cleaned = cleaned[:start]
+				break
+			}
+			start = strings.Index(cleaned, pair[0])
+		}
+	}
+
+	// Trim whitespace and newlines
+	cleaned = strings.TrimSpace(cleaned)
+
+	// Remove ALL newline characters from content
+	cleaned = strings.ReplaceAll(cleaned, "\n", " ")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "")
+
+	// Remove multiple spaces
+	cleaned = strings.Join(strings.Fields(cleaned), " ")
+
+	// If content is empty or only contains tags/whitespace, return empty
+	if cleaned == "" || strings.HasPrefix(cleaned, "<") {
+		return ""
+	}
+
+	return cleaned
+}
+
+func getChatTitle(jsonlFile string) string {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return "[Error opening file]"
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
+	scanner.Buffer(buf, len(buf))
+	lineNum := 0
+	var firstSummary string
+
+	for scanner.Scan() {
+		lineNum++
+		if lineNum == 1 {
+			continue // Skip first line (file-history-snapshot)
+		}
+
+		var msg JSONLMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+
+		// Save first summary as fallback
+		if msg.Type == "summary" && msg.Summary != "" && firstSummary == "" {
+			firstSummary = msg.Summary
+		}
+
+		// Skip meta messages and find first real user message
+		if msg.Type == "user" && !msg.IsMeta {
+			content := msg.Message.Content
+			// Clean up system tags
+			content = cleanSystemTags(content)
+			if content != "" {
+				return content
+			}
+		}
+
+		// Stop after checking reasonable number of lines
+		if lineNum > 100 {
+			break
+		}
+	}
+
+	// Fallback to summary if no user message found
+	if firstSummary != "" {
+		return firstSummary
+	}
+
+	return "[No title]"
+}
+
+func getChatTimestamp(jsonlFile string) string {
+	info, err := os.Stat(jsonlFile)
+	if err != nil {
+		return "Unknown"
+	}
+	return info.ModTime().Format("2006-01-02 15:04:05")
+}
+
+func getChatVersion(jsonlFile string) string {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
+	scanner.Buffer(buf, len(buf))
+	lineNum := 0
+
+	for scanner.Scan() {
+		lineNum++
+		if lineNum == 2 { // Second line (first user message)
+			var msg JSONLMessage
+			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+				return ""
+			}
+			return msg.Version
+		}
+		if lineNum > 2 {
+			break
+		}
+	}
+
+	return ""
+}
+
+func countLines(jsonlFile string) int {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return 0
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
+	scanner.Buffer(buf, len(buf))
+	count := 0
+	for scanner.Scan() {
+		count++
+	}
+
+	return count
+}
+
+func getSlugFromChat(jsonlFile string) string {
+	file, err := os.Open(jsonlFile)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
+	scanner.Buffer(buf, len(buf))
+
+	// Scan all lines to find slug (it can be in any message)
+	for scanner.Scan() {
+		var msg JSONLMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			continue
+		}
+		if msg.Slug != "" {
+			return msg.Slug
+		}
+	}
+
+	return ""
+}
+
+func updateSessionsIndex(uuid string) error {
+	// Find all sessions-index.json files in project directories
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		indexPath := filepath.Join(projectsDir, entry.Name(), "sessions-index.json")
+		if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// Read the index
+		data, err := os.ReadFile(indexPath)
+		if err != nil {
+			continue
+		}
+
+		var index SessionsIndex
+		if err := json.Unmarshal(data, &index); err != nil {
+			continue
+		}
+
+		// Filter out the deleted session
+		originalLen := len(index.Entries)
+		var newEntries []SessionEntry
+		for _, entry := range index.Entries {
+			if entry.SessionID != uuid {
+				newEntries = append(newEntries, entry)
+			}
+		}
+
+		// Only write if something was removed
+		if len(newEntries) < originalLen {
+			index.Entries = newEntries
+
+			// Write back
+			data, err := json.MarshalIndent(index, "", "  ")
+			if err != nil {
+				return err
+			}
+
+			if err := os.WriteFile(indexPath, data, 0644); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func findRelatedFiles(uuid string) []string {
+	var files []string
+	var chatJSONLPath string
+
+	// Main JSONL file and subagents directory
+	matches, _ := filepath.Glob(filepath.Join(projectsDir, "*", uuid+".jsonl"))
+	for _, m := range matches {
+		files = append(files, m)
+		chatJSONLPath = m // Save for slug extraction
+
+		// Subagents directory (same name as jsonl but without extension)
+		subagentsDir := strings.TrimSuffix(m, ".jsonl")
+		if _, err := os.Stat(subagentsDir); err == nil {
+			files = append(files, subagentsDir)
+		}
+
+		// Tool results directory (within chat directory)
+		chatDir := strings.TrimSuffix(m, ".jsonl")
+		toolResultsDir := filepath.Join(chatDir, "tool-results")
+		if _, err := os.Stat(toolResultsDir); err == nil {
+			files = append(files, toolResultsDir)
+		}
+	}
+
+	// Plan file (via slug)
+	if chatJSONLPath != "" {
+		slug := getSlugFromChat(chatJSONLPath)
+		if slug != "" {
+			planFile := filepath.Join(plansDir, slug+".md")
+			if _, err := os.Stat(planFile); err == nil {
+				files = append(files, planFile)
+			}
+		}
+	}
+
+	// Debug file
+	debugFile := filepath.Join(debugDir, uuid+".txt")
+	if _, err := os.Stat(debugFile); err == nil {
+		files = append(files, debugFile)
+	}
+
+	// Todo files
+	todoMatches, _ := filepath.Glob(filepath.Join(todosDir, uuid+"*.json"))
+	files = append(files, todoMatches...)
+
+	// Session directory
+	sessionPath := filepath.Join(sessionDir, uuid)
+	if _, err := os.Stat(sessionPath); err == nil {
+		files = append(files, sessionPath)
+	}
+
+	// File history directory
+	fileHistoryPath := filepath.Join(fileHistoryDir, uuid)
+	if _, err := os.Stat(fileHistoryPath); err == nil {
+		files = append(files, fileHistoryPath)
+	}
+
+	// Agent memory files (v2.1.33+)
+	// Parse agent IDs from chat JSONL and delete local scope memory
+	if chatJSONLPath != "" {
+		agentIDs := parseAgentIDs(chatJSONLPath)
+		for _, agentID := range agentIDs {
+			// Delete local scope memory (always tied to this chat session)
+			localMemory := filepath.Join(agentsDir, agentID, "memory-local.md")
+			if _, err := os.Stat(localMemory); err == nil {
+				files = append(files, localMemory)
+			}
+
+			// Note: We don't delete memory-project.md or memory-user.md as they may be
+			// shared across multiple chats. Consider implementing reference counting
+			// in a future version if needed.
+		}
+	}
+
+	return files
+}
+
+// parseAgentIDs extracts agent IDs from chat JSONL file
+func parseAgentIDs(chatFile string) []string {
+	var agentIDs []string
+	seen := make(map[string]bool)
+
+	file, err := os.Open(chatFile)
+	if err != nil {
+		return agentIDs
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
+	scanner.Buffer(buf, len(buf))
+	for scanner.Scan() {
+		var msg struct {
+			AgentID string `json:"agent_id"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err == nil {
+			if msg.AgentID != "" && !seen[msg.AgentID] {
+				agentIDs = append(agentIDs, msg.AgentID)
+				seen[msg.AgentID] = true
+			}
+		}
+	}
+
+	return agentIDs
+}
