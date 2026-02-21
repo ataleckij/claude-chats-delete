@@ -352,8 +352,10 @@ func (m model) View() string {
 			lines = "-"
 		}
 
-		title := runewidth.Truncate(chat.Title, titleWidth-2, "..")
-		project := runewidth.Truncate(chat.Project, projectWidth-2, "..")
+		titleClean := strings.NewReplacer("\n", " ").Replace(chat.Title)
+		title := runewidth.Truncate(titleClean, titleWidth-2, "..")
+		projectClean := strings.NewReplacer("\n", " ").Replace(chat.Project)
+		project := runewidth.Truncate(projectClean, projectWidth-2, "..")
 
 		// Selection indicator
 		indicator := "[ ]"
