@@ -54,12 +54,16 @@ func makeTestChats(n int) []Chat {
 // Layout constants — update these if the View() layout changes.
 // If a test fails, it means View() gained or lost a fixed line.
 const (
-	fixedHeaderLines = 4 // title + stats + column headers + separator
-	fixedFooterLines = 1 // help OR confirmation (mutually exclusive, always 1)
+	fixedHeaderLines        = 4 // title + stats + column headers + top-separator
+	fixedFooterLines        = 2 // bottom-separator + help (OR confirmation, same count)
+	fixedFooterLinesCompact = 3 // bottom-separator + 2 help lines (actions + navigation)
+
+	normalWidth  = compactModeWidth + 10 // full mode: timestamp 19, version visible, 1 help line
+	compactWidth = compactModeWidth - 30 // compact mode: timestamp 11, no version, 2 help lines
 )
 
 func TestView_EmptyChats(t *testing.T) {
-	m := makeTestModel(nil, 100, 20)
+	m := makeTestModel(nil, normalWidth, 20)
 	output := stripANSI(m.View())
 
 	// Empty state is a special path returning "No chats found.\n\nPress q to quit.\n"
@@ -72,8 +76,8 @@ func TestView_EmptyChats(t *testing.T) {
 func TestView_FewChats_NoScroll(t *testing.T) {
 	// 5 chats, height=20 → visibleHeight=12 → all 5 fit, no scroll indicator
 	chats := makeTestChats(5)
-	m := makeTestModel(chats, 100, 20)
-	// expected: header(4) + chats(5) + scroll(0) + status(0) + help(1) = 10
+	m := makeTestModel(chats, normalWidth, 20)
+	// expected: header(4) + chats(5) + scroll(0) + status(0) + footer(2) = 11
 	expected := fixedHeaderLines + 5 + 0 + 0 + fixedFooterLines
 	got := viewLineCount(m.View())
 	if got != expected {
@@ -82,11 +86,11 @@ func TestView_FewChats_NoScroll(t *testing.T) {
 }
 
 func TestView_ManyChats_WithScroll(t *testing.T) {
-	// 30 chats, height=20 → visibleHeight=12 → scroll indicator shown
+	// 30 chats, height=20 → visibleHeight=11 → scroll indicator shown
 	chats := makeTestChats(30)
-	m := makeTestModel(chats, 100, 20)
-	// expected: header(4) + chats(12) + scroll(1) + status(0) + help(1) = 18
-	expected := fixedHeaderLines + 12 + 1 + 0 + fixedFooterLines
+	m := makeTestModel(chats, normalWidth, 20)
+	// expected: header(4) + chats(11) + scroll(1) + status(0) + footer(2) = 18
+	expected := fixedHeaderLines + 11 + 1 + 0 + fixedFooterLines
 	got := viewLineCount(m.View())
 	if got != expected {
 		t.Errorf("many chats with scroll: expected %d lines, got %d", expected, got)
@@ -96,9 +100,9 @@ func TestView_ManyChats_WithScroll(t *testing.T) {
 func TestView_WithErrorMessage(t *testing.T) {
 	// Error message occupies the status slot
 	chats := makeTestChats(5)
-	m := makeTestModel(chats, 100, 20)
+	m := makeTestModel(chats, normalWidth, 20)
 	m.error = "something went wrong"
-	// expected: header(4) + chats(5) + scroll(0) + status(1) + help(1) = 11
+	// expected: header(4) + chats(5) + scroll(0) + status(1) + footer(2) = 12
 	expected := fixedHeaderLines + 5 + 0 + 1 + fixedFooterLines
 	got := viewLineCount(m.View())
 	if got != expected {
@@ -109,9 +113,9 @@ func TestView_WithErrorMessage(t *testing.T) {
 func TestView_WithDeletedMessage(t *testing.T) {
 	// deleted > 0 occupies the status slot
 	chats := makeTestChats(5)
-	m := makeTestModel(chats, 100, 20)
+	m := makeTestModel(chats, normalWidth, 20)
 	m.deleted = 3
-	// expected: header(4) + chats(5) + scroll(0) + status(1) + help(1) = 11
+	// expected: header(4) + chats(5) + scroll(0) + status(1) + footer(2) = 12
 	expected := fixedHeaderLines + 5 + 0 + 1 + fixedFooterLines
 	got := viewLineCount(m.View())
 	if got != expected {
@@ -122,11 +126,11 @@ func TestView_WithDeletedMessage(t *testing.T) {
 func TestView_ConfirmDialog_ReplacesHelp(t *testing.T) {
 	// confirmDelete replaces help line — total count must be SAME as normal
 	chats := makeTestChats(5)
-	m := makeTestModel(chats, 100, 20)
+	m := makeTestModel(chats, normalWidth, 20)
 	m.selected[0] = true
 	m.confirmDelete = true
-	// expected: header(4) + chats(5) + scroll(0) + status(0) + confirm(1) = 10
-	// same as TestView_FewChats_NoScroll — confirmation replaces, not adds
+	// expected: header(4) + chats(5) + scroll(0) + status(0) + footer(2) = 11
+	// same as TestView_FewChats_NoScroll — confirmation replaces help but separator stays
 	expected := fixedHeaderLines + 5 + 0 + 0 + fixedFooterLines
 	got := viewLineCount(m.View())
 	if got != expected {
@@ -138,8 +142,8 @@ func TestView_SmallTerminal_UsesMinVisibleHeight(t *testing.T) {
 	// height=5 → visibleHeight falls back to 10 (not negative)
 	// 3 chats < 10 (fallback visible height) → no scroll indicator
 	chats := makeTestChats(3)
-	m := makeTestModel(chats, 100, 5)
-	// expected: header(4) + chats(3) + scroll(0) + status(0) + help(1) = 8
+	m := makeTestModel(chats, normalWidth, 5)
+	// expected: header(4) + chats(3) + scroll(0) + status(0) + footer(2) = 9
 	expected := fixedHeaderLines + 3 + 0 + 0 + fixedFooterLines
 	got := viewLineCount(m.View())
 	if got != expected {
@@ -161,10 +165,10 @@ func TestView_TitleWithNewline_DoesNotBreakLayout(t *testing.T) {
 			LineCount: 1,
 		},
 	}
-	m := makeTestModel(chats, 100, 20)
+	m := makeTestModel(chats, normalWidth, 20)
 	output := stripANSI(m.View())
 
-	// 1 chat, no scroll, no status: header(4) + chat(1) + help(1) = 6
+	// 1 chat, no scroll, no status: header(4) + chat(1) + footer(2) = 7
 	expected := fixedHeaderLines + 1 + 0 + 0 + fixedFooterLines
 	got := strings.Count(output, "\n")
 	if got != expected {
@@ -185,7 +189,7 @@ func TestView_ProjectWithNewline_DoesNotBreakLayout(t *testing.T) {
 			LineCount: 1,
 		},
 	}
-	m := makeTestModel(chats, 100, 20)
+	m := makeTestModel(chats, normalWidth, 20)
 	output := stripANSI(m.View())
 
 	expected := fixedHeaderLines + 1 + 0 + 0 + fixedFooterLines
@@ -196,23 +200,37 @@ func TestView_ProjectWithNewline_DoesNotBreakLayout(t *testing.T) {
 	}
 }
 
+func TestView_CompactMode_TwoHelpLines(t *testing.T) {
+	// width < compactModeWidth: compact mode renders 2 help lines instead of 1
+	chats := makeTestChats(5)
+	m := makeTestModel(chats, compactWidth, 20)
+	// expected: header(4) + chats(5) + scroll(0) + status(0) + footer(3) = 12
+	expected := fixedHeaderLines + 5 + 0 + 0 + fixedFooterLinesCompact
+	got := viewLineCount(m.View())
+	if got != expected {
+		t.Errorf("compact mode two help lines: expected %d lines, got %d", expected, got)
+	}
+}
+
 func TestVisibleHeight(t *testing.T) {
 	tests := []struct {
+		width  int
 		height int
 		want   int
 	}{
-		{height: 20, want: 12}, // 20 - 8 = 12
-		{height: 40, want: 32}, // 40 - 8 = 32
-		{height: 9, want: 1},   // 9 - 8 = 1
-		{height: 8, want: 10},  // 8 - 8 = 0 < 1 → fallback 10
-		{height: 5, want: 10},  // 5 - 8 < 1 → fallback 10
-		{height: 0, want: 10},  // 0 - 8 < 1 → fallback 10
+		{width: normalWidth, height: 20, want: 11}, // 20 - 9 = 11
+		{width: normalWidth, height: 40, want: 31}, // 40 - 9 = 31
+		{width: normalWidth, height: 10, want: 1},  // 10 - 9 = 1
+		{width: normalWidth, height: 9, want: 10},  // 9 - 9 = 0 < 1 → fallback 10
+		{width: compactWidth, height: 20, want: 10}, // compact: 20 - 10 = 10
+		{width: compactWidth, height: 5, want: 10},  // compact: 5 - 10 < 1 → fallback 10
 	}
 	for _, tt := range tests {
-		m := model{height: tt.height}
+		m := model{width: tt.width, height: tt.height}
 		got := m.visibleHeight()
 		if got != tt.want {
-			t.Errorf("visibleHeight() with height=%d: got %d, want %d", tt.height, got, tt.want)
+			t.Errorf("visibleHeight() with width=%d height=%d: got %d, want %d",
+				tt.width, tt.height, got, tt.want)
 		}
 	}
 }

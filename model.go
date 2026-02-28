@@ -11,6 +11,10 @@ import (
 	"github.com/muesli/termenv"
 )
 
+// compactModeWidth is the terminal width threshold below which compact layout
+// is used: shortened timestamp, no VERSION column, two-line help text.
+const compactModeWidth = 110
+
 var (
 	// Styles
 	titleStyle = lipgloss.NewStyle().
@@ -89,7 +93,11 @@ func initialModel() model {
 }
 
 func (m model) visibleHeight() int {
-	h := m.height - 8
+	fixed := 9 // header(4) + bottom-separator(1) + help(1) + scroll(0-1) + status(0-1) = 9 base
+	if m.width < compactModeWidth {
+		fixed = 10 // compact: +1 for extra help line (separator already in base)
+	}
+	h := m.height - fixed
 	if h < 1 {
 		h = 10
 	}
@@ -287,16 +295,29 @@ func (m model) View() string {
 	}
 
 	// Calculate column widths based on terminal width
-	// Fixed: indicator(4) + timestamp(19) + version(8) + lines(6) + gaps(8) = 45
 	width := m.width
 	if width < 75 {
 		width = 75 // minimum width
 	}
 
-	versionWidth := 8
-	// msgWidth := 5 // TODO: maybe re-enable later
-	linesWidth := 6
-	remaining := width - 45
+	compact := width < compactModeWidth
+
+	// In compact mode: hide VERSION, shorten TIMESTAMP to "MM-DD HH:MM" (11 chars)
+	// Fixed cols: indicator(4) + timestamp + version + lines(6) + gaps
+	var timestampWidth, versionWidth int
+	var fixedWidth int
+	if compact {
+		timestampWidth = 11 // "01-15 14:32"
+		versionWidth = 0
+		fixedWidth = 4 + timestampWidth + 5 + 5 // indicator + ts + lines + gaps
+	} else {
+		timestampWidth = 19 // "2025-01-15 14:32:10"
+		versionWidth = 8
+		fixedWidth = 44 // indicator(4) + ts(19) + version(8) + lines(5) + gaps(8)
+	}
+
+	linesWidth := 5
+	remaining := width - fixedWidth
 	titleWidth := remaining * 60 / 100 // 60% for title
 	projectWidth := remaining - titleWidth
 
@@ -319,11 +340,17 @@ func (m model) View() string {
 	s.WriteString("\n")
 
 	// Column headers
-	headerFmt := fmt.Sprintf("    %%-19s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
-	header := fmt.Sprintf(headerFmt, "TIMESTAMP", "VERSION", "LINES", "TITLE", "PROJECT")
+	var header string
+	if compact {
+		headerFmt := fmt.Sprintf("    %%-*s  %%-%ds  %%-%ds  %%-%ds", linesWidth, titleWidth, projectWidth)
+		header = fmt.Sprintf(headerFmt, timestampWidth, "TIMESTAMP", "LINES", "TITLE", "PROJECT")
+	} else {
+		headerFmt := fmt.Sprintf("    %%-*s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
+		header = fmt.Sprintf(headerFmt, timestampWidth, "TIMESTAMP", "VERSION", "LINES", "TITLE", "PROJECT")
+	}
 	s.WriteString(dimStyle.Render(header))
 	s.WriteString("\n")
-	s.WriteString(strings.Repeat("─", width))
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
 
 	// Chat list
@@ -340,22 +367,37 @@ func (m model) View() string {
 		chat := m.chats[i]
 
 		// Truncate fields using visual width
-		timestamp := runewidth.Truncate(chat.Timestamp, 19, "")
+		var timestamp string
+		if compact {
+			// "2025-01-15 14:32:10" -> "01-15 14:32"
+			if len(chat.Timestamp) >= 16 {
+				timestamp = chat.Timestamp[5:16] // "MM-DD HH:MM"
+			} else {
+				timestamp = runewidth.Truncate(chat.Timestamp, timestampWidth, "")
+			}
+		} else {
+			timestamp = runewidth.Truncate(chat.Timestamp, timestampWidth, "")
+		}
 		version := runewidth.Truncate(chat.Version, versionWidth-1, "")
 		// TODO: msg column - maybe re-enable later
 		// msg := fmt.Sprintf("%d", chat.MessageCount)
 		// if chat.MessageCount == 0 {
 		// 	msg = "-"
 		// }
-		lines := fmt.Sprintf("%d", chat.LineCount)
-		if chat.LineCount == 0 {
+		var lines string
+		switch {
+		case chat.LineCount == 0:
 			lines = "-"
+		case chat.LineCount >= 10000:
+			lines = fmt.Sprintf("%dk", chat.LineCount/1000)
+		default:
+			lines = fmt.Sprintf("%d", chat.LineCount)
 		}
 
 		titleClean := strings.NewReplacer("\n", " ").Replace(chat.Title)
-		title := runewidth.Truncate(titleClean, titleWidth-2, "..")
+		title := runewidth.Truncate(titleClean, titleWidth, "..")
 		projectClean := strings.NewReplacer("\n", " ").Replace(chat.Project)
-		project := runewidth.Truncate(projectClean, projectWidth-2, "..")
+		project := truncateLeft(projectClean, projectWidth-2)
 
 		// Selection indicator
 		indicator := "[ ]"
@@ -363,8 +405,14 @@ func (m model) View() string {
 			indicator = "[✓]"
 		}
 
-		lineFmt := fmt.Sprintf("%%s %%-19s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
-		line := fmt.Sprintf(lineFmt, indicator, timestamp, version, lines, title, project)
+		var line string
+		if compact {
+			lineFmt := fmt.Sprintf("%%s %%-*s  %%-%ds  %%-%ds  %%-%ds", linesWidth, titleWidth, projectWidth)
+			line = fmt.Sprintf(lineFmt, indicator, timestampWidth, timestamp, lines, title, project)
+		} else {
+			lineFmt := fmt.Sprintf("%%s %%-*s  %%-%ds  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth, projectWidth)
+			line = fmt.Sprintf(lineFmt, indicator, timestampWidth, timestamp, version, lines, title, project)
+		}
 
 		// Apply styles
 		style := lipgloss.NewStyle()
@@ -386,7 +434,11 @@ func (m model) View() string {
 		s.WriteString("\n")
 	}
 
-	// Status messages
+	// Bottom separator
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
+	s.WriteString("\n")
+
+	// Status messages (below separator)
 	if m.error != "" {
 		s.WriteString(errorStyle.Render("Error: " + m.error))
 		s.WriteString("\n")
@@ -398,14 +450,24 @@ func (m model) View() string {
 		s.WriteString("\n")
 	}
 
-	// Confirmation dialog
+	// Help / Confirmation dialog
 	if m.confirmDelete {
 		s.WriteString(errorStyle.Render(fmt.Sprintf("Delete %d chat(s)?", len(m.selected))))
 		s.WriteString(" ")
 		s.WriteString(helpStyle.Render("[ENTER=Yes] [ESC=No]"))
 		s.WriteString("\n")
+	} else if compact {
+		actionsLine := justifyItems("Actions:    ",
+			[]string{"<Space>:Toggle (a:All)", "d:Delete", "c:Copy", "r:Refresh", "q:Quit"},
+			width)
+		navLine := justifyItems("Navigation: ",
+			[]string{"↑/↓", "f/b:PgDn/PgUp", "F/B:Half", "g/G:Home/End"},
+			width)
+		s.WriteString(helpStyle.Render(actionsLine))
+		s.WriteString("\n")
+		s.WriteString(helpStyle.Render(navLine))
+		s.WriteString("\n")
 	} else {
-		// Help
 		help := "↑/↓:Nav | <Space>:Toggle (a:All) | c:Copy ID | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
