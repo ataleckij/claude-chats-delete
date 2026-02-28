@@ -37,6 +37,10 @@ jobs:
         with:
           go-version: '1.21'
 
+      - name: Run tests
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: go test ./...
+
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
