@@ -70,6 +70,7 @@ var (
 	debugDir       string
 	todosDir       string
 	sessionDir     string
+	tasksDir       string
 	fileHistoryDir string
 	plansDir       string
 	agentsDir      string
@@ -139,6 +140,7 @@ func initializePaths(dir string) {
 	debugDir = filepath.Join(claudeDir, "debug")
 	todosDir = filepath.Join(claudeDir, "todos")
 	sessionDir = filepath.Join(claudeDir, "session-env")
+	tasksDir = filepath.Join(claudeDir, "tasks")
 	fileHistoryDir = filepath.Join(claudeDir, "file-history")
 	plansDir = filepath.Join(claudeDir, "plans")
 	agentsDir = filepath.Join(claudeDir, "agents")

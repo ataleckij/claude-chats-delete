@@ -367,6 +367,12 @@ func findRelatedFiles(uuid string) []string {
 		files = append(files, sessionPath)
 	}
 
+	// Task state directory
+	tasksPath := filepath.Join(tasksDir, uuid)
+	if _, err := os.Stat(tasksPath); err == nil {
+		files = append(files, tasksPath)
+	}
+
 	// File history directory
 	fileHistoryPath := filepath.Join(fileHistoryDir, uuid)
 	if _, err := os.Stat(fileHistoryPath); err == nil {

@@ -16,7 +16,7 @@ Tested with Claude Code v2.1.62.
 - View chat titles, timestamps, versions, line counts, and projects
 - Copy chat UUID to clipboard
 - Multiple selection with visual indicators
-- Delete chats with all related files (subagents, tool-results, file-history, debug, todos, session-env, plans)
+- Delete chats with all related files (subagents, tool-results, file-history, debug, todos, session-env, tasks, plans)
 - Keyboard-driven navigation (vim-style support with fast page scrolling)
 - Color-coded interface
 - Auto-update on startup (checks GitHub for new releases)
@@ -88,6 +88,7 @@ All related files are deleted:
 - Debug logs (`debug/*.txt`)
 - Todo files (`todos/*.json`)
 - Session environment (`session-env/*/`)
+- Task state (`tasks/<uuid>/`)
 - Plan files (`plans/*.md`)
 - Entry in `sessions-index.json` (updated automatically)
 
@@ -136,6 +137,7 @@ The tool manages files in `~/.claude/`:
 ├── debug/<uuid>.txt              # Debug logs
 ├── todos/<uuid>-*.json           # Todo lists
 ├── session-env/<uuid>/           # Session environments
+├── tasks/<uuid>/                 # Background task state
 ├── plans/*.md                    # Plan mode files
 └── agents/<agent-id>/            # Agent memory (v2.1.33+)
     ├── memory-local.md           # Session-specific memory (deleted)

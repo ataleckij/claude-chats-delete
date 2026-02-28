@@ -190,6 +190,7 @@ func setupStorageDirs(t *testing.T) string {
 	origDebug := debugDir
 	origTodos := todosDir
 	origSession := sessionDir
+	origTasks := tasksDir
 	origFileHistory := fileHistoryDir
 	origPlans := plansDir
 	origAgents := agentsDir
@@ -198,11 +199,12 @@ func setupStorageDirs(t *testing.T) string {
 	debugDir = filepath.Join(tmp, "debug")
 	todosDir = filepath.Join(tmp, "todos")
 	sessionDir = filepath.Join(tmp, "session-env")
+	tasksDir = filepath.Join(tmp, "tasks")
 	fileHistoryDir = filepath.Join(tmp, "file-history")
 	plansDir = filepath.Join(tmp, "plans")
 	agentsDir = filepath.Join(tmp, "agents")
 
-	for _, d := range []string{projectsDir, debugDir, todosDir, sessionDir, fileHistoryDir, plansDir, agentsDir} {
+	for _, d := range []string{projectsDir, debugDir, todosDir, sessionDir, tasksDir, fileHistoryDir, plansDir, agentsDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
@@ -213,6 +215,7 @@ func setupStorageDirs(t *testing.T) string {
 		debugDir = origDebug
 		todosDir = origTodos
 		sessionDir = origSession
+		tasksDir = origTasks
 		fileHistoryDir = origFileHistory
 		plansDir = origPlans
 		agentsDir = origAgents
@@ -246,6 +249,7 @@ func TestFindRelatedFiles(t *testing.T) {
 		"debug":        filepath.Join(debugDir, uuid+".txt"),
 		"todo":         filepath.Join(todosDir, uuid+"-todos.json"),
 		"session-env":  filepath.Join(sessionDir, uuid),
+		"tasks":        filepath.Join(tasksDir, uuid),
 		"file-history": filepath.Join(fileHistoryDir, uuid),
 		"subagents":    filepath.Join(projDir, uuid),
 		"plan":         filepath.Join(plansDir, "my-slug.md"),
@@ -255,7 +259,7 @@ func TestFindRelatedFiles(t *testing.T) {
 		if key == "jsonl" {
 			continue
 		}
-		if key == "session-env" || key == "file-history" || key == "subagents" {
+		if key == "session-env" || key == "tasks" || key == "file-history" || key == "subagents" {
 			if err := os.MkdirAll(path, 0755); err != nil {
 				t.Fatalf("mkdir %s: %v", key, err)
 			}

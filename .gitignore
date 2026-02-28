@@ -8,7 +8,7 @@ claude-chats-*
 
 # agents
 .claude/
-.codex/
+AGENTS.md
 
 # Go
 vendor/
