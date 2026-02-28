@@ -9,8 +9,24 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Run tests
+        run: go test ./...
+
   build:
     name: Build binaries
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -36,10 +52,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-
-      - name: Run tests
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: go test ./...
 
       - name: Build binary
         env:
