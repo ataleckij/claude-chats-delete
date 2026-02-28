@@ -54,7 +54,7 @@ func makeTestChats(n int) []Chat {
 // Layout constants — update these if the View() layout changes.
 // If a test fails, it means View() gained or lost a fixed line.
 const (
-	fixedHeaderLines        = 4 // title + stats + column headers + top-separator
+	fixedHeaderLines        = 4 // tabbar(+stats) + top-separator + col-headers + separator
 	fixedFooterLines        = 2 // bottom-separator + help (OR confirmation, same count)
 	fixedFooterLinesCompact = 3 // bottom-separator + 2 help lines (actions + navigation)
 
@@ -91,6 +91,7 @@ func TestView_ManyChats_WithScroll(t *testing.T) {
 	m := makeTestModel(chats, normalWidth, 20)
 	// expected: header(4) + chats(11) + scroll(1) + status(0) + footer(2) = 18
 	expected := fixedHeaderLines + 11 + 1 + 0 + fixedFooterLines
+
 	got := viewLineCount(m.View())
 	if got != expected {
 		t.Errorf("many chats with scroll: expected %d lines, got %d", expected, got)
@@ -218,10 +219,10 @@ func TestVisibleHeight(t *testing.T) {
 		height int
 		want   int
 	}{
-		{width: normalWidth, height: 20, want: 11}, // 20 - 9 = 11
-		{width: normalWidth, height: 40, want: 31}, // 40 - 9 = 31
-		{width: normalWidth, height: 10, want: 1},  // 10 - 9 = 1
-		{width: normalWidth, height: 9, want: 10},  // 9 - 9 = 0 < 1 → fallback 10
+		{width: normalWidth, height: 20, want: 11},  // 20 - 9 = 11
+		{width: normalWidth, height: 40, want: 31},  // 40 - 9 = 31
+		{width: normalWidth, height: 10, want: 1},   // 10 - 9 = 1
+		{width: normalWidth, height: 9, want: 10},   // 9 - 9 = 0 < 1 → fallback 10
 		{width: compactWidth, height: 20, want: 10}, // compact: 20 - 10 = 10
 		{width: compactWidth, height: 5, want: 10},  // compact: 5 - 10 < 1 → fallback 10
 	}

@@ -15,11 +15,24 @@ import (
 // is used: shortened timestamp, no VERSION column, two-line help text.
 const compactModeWidth = 110
 
+const (
+	tabChats    = 0
+	tabSettings = 1
+)
+
+var tabs = []string{"Chats", "Settings"}
+
 var (
 	// Styles
-	titleStyle = lipgloss.NewStyle().
+	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("6"))
+			Background(adaptiveColor("6", "6")).
+			Foreground(adaptiveColor("0", "0")).
+			Padding(0, 1)
+
+	inactiveTabStyle = lipgloss.NewStyle().
+				Foreground(adaptiveColor("241", "8")).
+				Padding(0, 1)
 
 	selectedStyle = lipgloss.NewStyle().
 			Bold(true).
@@ -69,6 +82,8 @@ type clearDeleteMsg struct {
 }
 
 type model struct {
+	tab           int
+	cfg           *Config
 	chats         []Chat
 	cursor        int
 	selected      map[int]bool
@@ -84,18 +99,44 @@ type model struct {
 	copyTimer     int // Track active copy message timer
 }
 
-func initialModel() model {
-	chats := findAllChats()
+func initialModel(cfg *Config) model {
 	return model{
-		chats:    chats,
+		cfg:      cfg,
+		chats:    findAllChats(),
 		selected: make(map[int]bool),
 	}
 }
 
+func (m model) renderTabBar() string {
+	appName := dimStyle.Render("Claude Code Manager")
+	var tabParts []string
+	for i, name := range tabs {
+		if i == m.tab {
+			tabParts = append(tabParts, activeTabStyle.Render(name))
+		} else {
+			tabParts = append(tabParts, inactiveTabStyle.Render(name))
+		}
+	}
+	left := appName + "   " + strings.Join(tabParts, " ")
+	if m.tab != tabChats {
+		return left
+	}
+	stats := dimStyle.Render(fmt.Sprintf("Total: %d | Selected: %d", len(m.chats), len(m.selected)))
+	width := m.width
+	if width < 75 {
+		width = 75
+	}
+	gap := width - lipgloss.Width(left) - lipgloss.Width(stats)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + stats
+}
+
 func (m model) visibleHeight() int {
-	fixed := 9 // header(4) + bottom-separator(1) + help(1) + scroll(0-1) + status(0-1) = 9 base
+	fixed := 9 // tabbar(1) + sep(1) + col-header(1) + sep(1) + bottom-sep(1) + help(1) + scroll(0-1) + status(0-1)
 	if m.width < compactModeWidth {
-		fixed = 10 // compact: +1 for extra help line (separator already in base)
+		fixed = 10 // compact: +1 for extra help line
 	}
 	h := m.height - fixed
 	if h < 1 {
@@ -116,7 +157,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Confirmation dialog mode
+		// Confirmation dialog intercepts esc before global keys
 		if m.confirmDelete {
 			switch msg.String() {
 			case "enter":
@@ -127,10 +168,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Normal mode
+		// Global keys
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			return m, tea.Quit
+		case "left":
+			if m.tab > 0 {
+				m.tab--
+			}
+			return m, nil
+		case "right":
+			if m.tab < len(tabs)-1 {
+				m.tab++
+			}
+			return m, nil
+		}
+
+		// Settings tab
+		if m.tab == tabSettings {
+			if msg.String() == "enter" && m.cfg != nil {
+				m.cfg.AutoUpdates = !m.cfg.AutoUpdates
+				saveConfig(m.cfg)
+			}
+			return m, nil
+		}
+
+		// Chats tab normal mode
+		switch msg.String() {
 
 		case "up", "k":
 			if m.cursor > 0 {
@@ -289,9 +353,46 @@ func (m *model) adjustScroll() {
 	}
 }
 
+func (m model) viewSettings() string {
+	width := m.width
+	if width < 75 {
+		width = 75
+	}
+
+	var s strings.Builder
+	s.WriteString(m.renderTabBar())
+	s.WriteString("\n")
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
+	s.WriteString("\n\n")
+
+	// Auto-updates setting
+	val := "OFF"
+	valStyle := errorStyle
+	if m.cfg != nil && m.cfg.AutoUpdates {
+		val = "ON"
+		valStyle = successStyle
+	}
+	hint := ""
+	if m.cfg == nil || !m.cfg.AutoUpdates {
+		hint = "  " + dimStyle.Render("(use `claude-chats --update` for manual update)")
+	}
+	s.WriteString(fmt.Sprintf("  Auto-updates    %s%s\n", valStyle.Render(val), hint))
+
+	s.WriteString("\n")
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
+	s.WriteString("\n")
+	s.WriteString(helpStyle.Render("Enter:Toggle | ←/→:Switch tabs | q:Quit"))
+	s.WriteString("\n")
+	return s.String()
+}
+
 func (m model) View() string {
+	if m.tab == tabSettings {
+		return m.viewSettings()
+	}
+
 	if len(m.chats) == 0 {
-		return titleStyle.Render("No chats found.") + "\n\nPress q to quit.\n"
+		return activeTabStyle.Render("No chats found.") + "\n\nPress q to quit.\n"
 	}
 
 	// Calculate column widths based on terminal width
@@ -331,12 +432,13 @@ func (m model) View() string {
 	var s strings.Builder
 
 	// Header
-	s.WriteString(titleStyle.Render("Claude Code Chat Manager"))
+	s.WriteString(m.renderTabBar())
 	s.WriteString("\n")
 
-	// Stats
-	stats := fmt.Sprintf("Total: %d | Selected: %d", len(m.chats), len(m.selected))
-	s.WriteString(dimStyle.Render(stats))
+
+
+
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
 
 	// Column headers
@@ -457,18 +559,14 @@ func (m model) View() string {
 		s.WriteString(helpStyle.Render("[ENTER=Yes] [ESC=No]"))
 		s.WriteString("\n")
 	} else if compact {
-		actionsLine := justifyItems("Actions:    ",
-			[]string{"<Space>:Toggle (a:All)", "d:Delete", "c:Copy", "r:Refresh", "q:Quit"},
-			width)
-		navLine := justifyItems("Navigation: ",
-			[]string{"↑/↓", "f/b:PgDn/PgUp", "F/B:Half", "g/G:Home/End"},
-			width)
+		actionsLine := "Actions:    <Space>: Toggle | a: Toggle All | d: Delete | c: Copy | r: Refresh | q: Quit"
+		navLine := "Navigation: ↑/↓: Chats | ←/→: Tabs | f/b: PgDn/PgUp | F/B: Half | g/G: Home/End"
 		s.WriteString(helpStyle.Render(actionsLine))
 		s.WriteString("\n")
 		s.WriteString(helpStyle.Render(navLine))
 		s.WriteString("\n")
 	} else {
-		help := "↑/↓:Nav | <Space>:Toggle (a:All) | c:Copy ID | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
+		help := "↑/↓:Chats | ←/→:Tabs | <Space>:Toggle | a:Toggle All | c:Copy ID | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}
