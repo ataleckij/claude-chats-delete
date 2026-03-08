@@ -162,6 +162,24 @@ func TestGetChatTitle(t *testing.T) {
 			},
 			want: "[No title]",
 		},
+		{
+			name: "interrupt placeholder is ignored and next user message is used",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"[Request interrupted by user]"},"isMeta":false}`,
+				`{"type":"user","message":{"content":"real question"},"isMeta":false}`,
+			},
+			want: "real question",
+		},
+		{
+			name: "local command xml content is ignored as title",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"<command-name>/usage</command-name><command-message>usage</command-message>"},"isMeta":false}`,
+				`{"type":"summary","summary":"fallback summary"}`,
+			},
+			want: "fallback summary",
+		},
 	}
 
 	for _, tt := range tests {
@@ -174,6 +192,59 @@ func TestGetChatTitle(t *testing.T) {
 			// Critical regression: title must never contain newline (breaks UI layout)
 			if strings.Contains(got, "\n") {
 				t.Errorf("getChatTitle() returned title with newline: %q", got)
+			}
+		})
+	}
+}
+
+func TestGetChatVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{
+			name: "version on second line",
+			lines: []string{
+				`{"type":"file-history-snapshot"}`,
+				`{"type":"user","version":"2.1.62","message":{"content":"hi"}}`,
+			},
+			want: "2.1.62",
+		},
+		{
+			name: "version on later line",
+			lines: []string{
+				`{"type":"file-history-snapshot"}`,
+				`{"type":"system","subtype":"local_command","content":"x"}`,
+				`{"type":"user","version":"2.1.71","message":{"content":"hi"}}`,
+			},
+			want: "2.1.71",
+		},
+		{
+			name: "skip invalid json line and find version later",
+			lines: []string{
+				`{"type":"file-history-snapshot"}`,
+				`{invalid-json`,
+				`{"type":"assistant","version":"2.1.70","message":{"content":"ok"}}`,
+			},
+			want: "2.1.70",
+		},
+		{
+			name: "no version returns empty",
+			lines: []string{
+				`{"type":"file-history-snapshot"}`,
+				`{"type":"system","subtype":"turn_duration","durationMs":42}`,
+			},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeTempJSONL(t, tt.lines)
+			got := getChatVersion(path)
+			if got != tt.want {
+				t.Errorf("getChatVersion() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -279,6 +350,40 @@ func TestFindRelatedFiles(t *testing.T) {
 	for key, path := range wantFiles {
 		if !found[path] {
 			t.Errorf("findRelatedFiles missing %s artifact: %s", key, path)
+		}
+	}
+}
+
+func TestFindRelatedFiles_PlanSharedSlugNotDeleted(t *testing.T) {
+	setupStorageDirs(t)
+
+	const slug = "shared-plan-slug"
+	uuid1 := "deadbeef-0000-0000-0000-000000000101"
+	uuid2 := "deadbeef-0000-0000-0000-000000000102"
+	project := "shared-plan-project"
+	projDir := filepath.Join(projectsDir, project)
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	content := "{\"type\":\"snapshot\"}\n" +
+		"{\"type\":\"user\",\"message\":{\"content\":\"hi\"},\"slug\":\"" + slug + "\",\"isMeta\":false}\n"
+	if err := os.WriteFile(filepath.Join(projDir, uuid1+".jsonl"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, uuid2+".jsonl"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	planFile := filepath.Join(plansDir, slug+".md")
+	if err := os.WriteFile(planFile, []byte("# plan"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := findRelatedFiles(uuid1)
+	for _, f := range got {
+		if f == planFile {
+			t.Fatalf("shared plan file must not be deleted while another chat uses same slug: %s", planFile)
 		}
 	}
 }

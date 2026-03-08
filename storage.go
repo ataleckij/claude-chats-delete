@@ -123,6 +123,10 @@ func cleanSystemTags(content string) string {
 	if cleaned == "" || strings.HasPrefix(cleaned, "<") {
 		return ""
 	}
+	// Ignore interrupt placeholder text used in some transcript variants.
+	if cleaned == "[Request interrupted by user]" {
+		return ""
+	}
 
 	return cleaned
 }
@@ -198,18 +202,14 @@ func getChatVersion(jsonlFile string) string {
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
 	scanner.Buffer(buf, len(buf))
-	lineNum := 0
-
+	checked := 0
 	for scanner.Scan() {
-		lineNum++
-		if lineNum == 2 { // Second line (first user message)
-			var msg JSONLMessage
-			if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
-				return ""
-			}
+		checked++
+		var msg JSONLMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err == nil && msg.Version != "" {
 			return msg.Version
 		}
-		if lineNum > 2 {
+		if checked >= 100 {
 			break
 		}
 	}
@@ -258,6 +258,31 @@ func getSlugFromChat(jsonlFile string) string {
 	}
 
 	return ""
+}
+
+// isSlugUsedInOtherChats checks whether slug is still referenced by chats other
+// than the one currently being deleted.
+func isSlugUsedInOtherChats(slug string, excludeUUID string) bool {
+	if slug == "" {
+		return false
+	}
+
+	matches, err := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
+	if err != nil {
+		return true // safe default: keep plan file if we cannot verify
+	}
+
+	for _, path := range matches {
+		uuid := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		if uuid == excludeUUID {
+			continue
+		}
+		if getSlugFromChat(path) == slug {
+			return true
+		}
+	}
+
+	return false
 }
 
 func updateSessionsIndex(uuid string) error {
@@ -343,7 +368,7 @@ func findRelatedFiles(uuid string) []string {
 	// Plan file (via slug)
 	if chatJSONLPath != "" {
 		slug := getSlugFromChat(chatJSONLPath)
-		if slug != "" {
+		if slug != "" && !isSlugUsedInOtherChats(slug, uuid) {
 			planFile := filepath.Join(plansDir, slug+".md")
 			if _, err := os.Stat(planFile); err == nil {
 				files = append(files, planFile)

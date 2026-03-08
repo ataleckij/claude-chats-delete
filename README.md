@@ -6,7 +6,7 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code v2.1.62.
+Tested with Claude Code v2.1.71.
 
 <img src="./demo.gif" />
 
@@ -91,6 +91,8 @@ All related files are deleted:
 - Task state (`tasks/<uuid>/`)
 - Plan files (`plans/*.md`)
 - Entry in `sessions-index.json` (updated automatically)
+
+Note: in newer Claude Code versions, debug logs are not written by default unless `/debug` is enabled.
 
 ## Updates
 
