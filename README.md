@@ -86,6 +86,7 @@ All related files are deleted:
 - Agent memory (`agents/<agent-id>/memory-local.md`)
 - File history (`file-history/<uuid>/`)
 - Debug logs (`debug/*.txt`)
+- Security warning state (`security_warnings_state_<uuid>.json`)
 - Todo files (`todos/*.json`)
 - Session environment (`session-env/*/`)
 - Task state (`tasks/<uuid>/`)

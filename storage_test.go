@@ -257,6 +257,7 @@ func setupStorageDirs(t *testing.T) string {
 	tmp := t.TempDir()
 
 	// save originals
+	origClaude := claudeDir
 	origProjects := projectsDir
 	origDebug := debugDir
 	origTodos := todosDir
@@ -266,6 +267,7 @@ func setupStorageDirs(t *testing.T) string {
 	origPlans := plansDir
 	origAgents := agentsDir
 
+	claudeDir = tmp
 	projectsDir = filepath.Join(tmp, "projects")
 	debugDir = filepath.Join(tmp, "debug")
 	todosDir = filepath.Join(tmp, "todos")
@@ -282,6 +284,7 @@ func setupStorageDirs(t *testing.T) string {
 	}
 
 	t.Cleanup(func() {
+		claudeDir = origClaude
 		projectsDir = origProjects
 		debugDir = origDebug
 		todosDir = origTodos
@@ -318,6 +321,7 @@ func TestFindRelatedFiles(t *testing.T) {
 	wantFiles := map[string]string{
 		"jsonl":        jsonlPath,
 		"debug":        filepath.Join(debugDir, uuid+".txt"),
+		"security":     filepath.Join(filepath.Dir(projectsDir), "security_warnings_state_"+uuid+".json"),
 		"todo":         filepath.Join(todosDir, uuid+"-todos.json"),
 		"session-env":  filepath.Join(sessionDir, uuid),
 		"tasks":        filepath.Join(tasksDir, uuid),

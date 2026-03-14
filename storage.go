@@ -382,6 +382,12 @@ func findRelatedFiles(uuid string) []string {
 		files = append(files, debugFile)
 	}
 
+	// Session-scoped security warning dedupe state (security-guidance hook)
+	securityWarningsStateFile := filepath.Join(claudeDir, "security_warnings_state_"+uuid+".json")
+	if _, err := os.Stat(securityWarningsStateFile); err == nil {
+		files = append(files, securityWarningsStateFile)
+	}
+
 	// Todo files
 	todoMatches, _ := filepath.Glob(filepath.Join(todosDir, uuid+"*.json"))
 	files = append(files, todoMatches...)
