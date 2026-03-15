@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	CurrentVersion = "0.2.7"
+	CurrentVersion = "0.3.0"
 	GitHubAPIURL   = "https://api.github.com/repos/ataleckij/claude-chats-delete/releases/latest"
 )
 
