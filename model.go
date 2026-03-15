@@ -81,6 +81,14 @@ type clearDeleteMsg struct {
 	id int
 }
 
+// groupRow represents a single row in the grouped view.
+// It is either a project header or a reference to a chat.
+type groupRow struct {
+	isHeader bool
+	project  string // project name (set for both headers and chats)
+	chatIdx  int    // index into m.chats (-1 for headers)
+}
+
 type model struct {
 	tab           int
 	cfg           *Config
@@ -97,14 +105,72 @@ type model struct {
 	copiedMsg     string
 	deleteTimer   int // Track active delete message timer
 	copyTimer     int // Track active copy message timer
+
+	// Settings tab
+	settingsCursor int
+
+	// Grouped view state
+	grouped          bool
+	expandedProjects map[string]bool
+	groupRows        []groupRow // virtual row list built from chats + expanded state
 }
 
 func initialModel(cfg *Config) model {
-	return model{
-		cfg:      cfg,
-		chats:    findAllChats(),
-		selected: make(map[int]bool),
+	grouped := cfg != nil && cfg.GroupByProject
+	m := model{
+		cfg:              cfg,
+		chats:            findAllChats(),
+		selected:         make(map[int]bool),
+		grouped:          grouped,
+		expandedProjects: make(map[string]bool),
 	}
+	if m.grouped {
+		m.rebuildGroupRows()
+	}
+	return m
+}
+
+// rebuildGroupRows creates the virtual row list from chats grouped by project.
+// Projects are ordered by the most recent chat timestamp (newest first).
+func (m *model) rebuildGroupRows() {
+	// Collect unique projects in order of first appearance
+	// (chats are already sorted by timestamp desc)
+	seen := make(map[string]bool)
+	var projects []string
+	for _, chat := range m.chats {
+		if !seen[chat.Project] {
+			seen[chat.Project] = true
+			projects = append(projects, chat.Project)
+		}
+	}
+
+	// Build chat index groups
+	chatsByProject := make(map[string][]int)
+	for i, chat := range m.chats {
+		chatsByProject[chat.Project] = append(chatsByProject[chat.Project], i)
+	}
+
+	var rows []groupRow
+	for _, proj := range projects {
+		rows = append(rows, groupRow{isHeader: true, project: proj, chatIdx: -1})
+		if m.expandedProjects[proj] {
+			for _, idx := range chatsByProject[proj] {
+				rows = append(rows, groupRow{isHeader: false, project: proj, chatIdx: idx})
+			}
+		}
+	}
+	m.groupRows = rows
+}
+
+// chatIndicesForProject returns all chat indices belonging to a project.
+func (m model) chatIndicesForProject(project string) []int {
+	var indices []int
+	for i, chat := range m.chats {
+		if chat.Project == project {
+			indices = append(indices, i)
+		}
+	}
+	return indices
 }
 
 func (m model) renderTabBar() string {
@@ -186,11 +252,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Settings tab
 		if m.tab == tabSettings {
-			if msg.String() == "enter" && m.cfg != nil {
-				m.cfg.AutoUpdates = !m.cfg.AutoUpdates
-				saveConfig(m.cfg)
+			switch msg.String() {
+			case "up", "k":
+				if m.settingsCursor > 0 {
+					m.settingsCursor--
+				}
+			case "down", "j":
+				if m.settingsCursor < settingsCount-1 {
+					m.settingsCursor++
+				}
+			case "enter":
+				if m.cfg != nil {
+					switch m.settingsCursor {
+					case settingAutoUpdates:
+						m.cfg.AutoUpdates = !m.cfg.AutoUpdates
+					case settingGroupByProject:
+						m.cfg.GroupByProject = !m.cfg.GroupByProject
+						m.grouped = m.cfg.GroupByProject
+						if m.grouped {
+							m.rebuildGroupRows()
+							m.cursor = 0
+							m.scrollOffset = 0
+						} else {
+							m.groupRows = nil
+							m.cursor = 0
+							m.scrollOffset = 0
+						}
+					}
+					saveConfig(m.cfg)
+				}
 			}
 			return m, nil
+		}
+
+		// Chats tab: grouped mode
+		if m.grouped {
+			return m.updateGrouped(msg)
 		}
 
 		// Chats tab normal mode
@@ -314,6 +411,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.scrollOffset = 0
 		m.confirmDelete = false
+		if m.grouped {
+			m.rebuildGroupRows()
+		}
 		// Clear other status messages
 		m.error = ""
 		m.copiedMsg = ""
@@ -353,6 +453,12 @@ func (m *model) adjustScroll() {
 	}
 }
 
+const (
+	settingAutoUpdates   = 0
+	settingGroupByProject = 1
+	settingsCount        = 2
+)
+
 func (m model) viewSettings() string {
 	width := m.width
 	if width < 75 {
@@ -366,22 +472,43 @@ func (m model) viewSettings() string {
 	s.WriteString("\n\n")
 
 	// Auto-updates setting
-	val := "OFF"
-	valStyle := errorStyle
+	autoVal := "OFF"
+	autoStyle := errorStyle
 	if m.cfg != nil && m.cfg.AutoUpdates {
-		val = "ON"
-		valStyle = successStyle
+		autoVal = "ON"
+		autoStyle = successStyle
 	}
-	hint := ""
+	autoHint := ""
 	if m.cfg == nil || !m.cfg.AutoUpdates {
-		hint = "  " + dimStyle.Render("(use `claude-chats --update` for manual update)")
+		autoHint = "  " + dimStyle.Render("(use `claude-chats --update` for manual update)")
 	}
-	s.WriteString(fmt.Sprintf("  Auto-updates    %s%s\n", valStyle.Render(val), hint))
+	autoLine := fmt.Sprintf("  Auto-updates      %s%s", autoStyle.Render(autoVal), autoHint)
+	if m.settingsCursor == settingAutoUpdates {
+		s.WriteString(cursorStyle.Render(autoLine))
+	} else {
+		s.WriteString(autoLine)
+	}
+	s.WriteString("\n")
+
+	// Group by project setting
+	groupVal := "OFF"
+	groupStyle := errorStyle
+	if m.cfg != nil && m.cfg.GroupByProject {
+		groupVal = "ON"
+		groupStyle = successStyle
+	}
+	groupLine := fmt.Sprintf("  Group by project  %s", groupStyle.Render(groupVal))
+	if m.settingsCursor == settingGroupByProject {
+		s.WriteString(cursorStyle.Render(groupLine))
+	} else {
+		s.WriteString(groupLine)
+	}
+	s.WriteString("\n")
 
 	s.WriteString("\n")
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("Enter:Toggle | ←/→:Switch tabs | q:Quit"))
+	s.WriteString(helpStyle.Render("↑/↓:Navigate | Enter:Toggle | ←/→:Switch tabs | q:Quit"))
 	s.WriteString("\n")
 	return s.String()
 }
@@ -389,6 +516,10 @@ func (m model) viewSettings() string {
 func (m model) View() string {
 	if m.tab == tabSettings {
 		return m.viewSettings()
+	}
+
+	if m.grouped {
+		return m.viewGrouped()
 	}
 
 	if len(m.chats) == 0 {
@@ -567,6 +698,381 @@ func (m model) View() string {
 		s.WriteString("\n")
 	} else {
 		help := "↑/↓:Chats | ←/→:Tabs | <Space>:Toggle | a:Toggle All | c:Copy ID | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
+		s.WriteString(helpStyle.Render(help))
+		s.WriteString("\n")
+	}
+
+	return s.String()
+}
+
+// updateGrouped handles key events in grouped view mode.
+// cursor indexes into m.groupRows (the virtual row list).
+func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	rowCount := len(m.groupRows)
+
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+			m.adjustScrollGrouped()
+		}
+
+	case "down", "j":
+		if m.cursor < rowCount-1 {
+			m.cursor++
+			m.adjustScrollGrouped()
+		}
+
+	case "f", "pgdown":
+		m.cursor += m.visibleHeight()
+		if m.cursor >= rowCount {
+			m.cursor = rowCount - 1
+		}
+		m.adjustScrollGrouped()
+
+	case "b", "pgup":
+		m.cursor -= m.visibleHeight()
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.adjustScrollGrouped()
+
+	case "F":
+		m.cursor += m.visibleHeight() / 2
+		if m.cursor >= rowCount {
+			m.cursor = rowCount - 1
+		}
+		m.adjustScrollGrouped()
+
+	case "B":
+		m.cursor -= m.visibleHeight() / 2
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
+		m.adjustScrollGrouped()
+
+	case "g", "home":
+		m.cursor = 0
+		m.adjustScrollGrouped()
+
+	case "G", "end":
+		if rowCount > 0 {
+			m.cursor = rowCount - 1
+		}
+		m.adjustScrollGrouped()
+
+	case "enter":
+		// Expand/collapse project header
+		if m.cursor < rowCount && m.groupRows[m.cursor].isHeader {
+			proj := m.groupRows[m.cursor].project
+			m.expandedProjects[proj] = !m.expandedProjects[proj]
+			m.rebuildGroupRows()
+			// Keep cursor on the same header
+			for i, row := range m.groupRows {
+				if row.isHeader && row.project == proj {
+					m.cursor = i
+					break
+				}
+			}
+			m.adjustScrollGrouped()
+		}
+
+	case " ":
+		if m.cursor < rowCount {
+			row := m.groupRows[m.cursor]
+			if row.isHeader {
+				// Toggle all chats in this project
+				indices := m.chatIndicesForProject(row.project)
+				allSelected := true
+				for _, idx := range indices {
+					if !m.selected[idx] {
+						allSelected = false
+						break
+					}
+				}
+				if allSelected {
+					for _, idx := range indices {
+						delete(m.selected, idx)
+					}
+				} else {
+					for _, idx := range indices {
+						m.selected[idx] = true
+					}
+				}
+			} else {
+				// Toggle individual chat
+				chatIdx := row.chatIdx
+				if m.selected[chatIdx] {
+					delete(m.selected, chatIdx)
+				} else {
+					m.selected[chatIdx] = true
+				}
+			}
+		}
+
+	case "a":
+		if len(m.chats) == 0 {
+			return m, nil
+		}
+		if len(m.selected) == len(m.chats) {
+			m.selected = make(map[int]bool)
+		} else {
+			for i := range m.chats {
+				m.selected[i] = true
+			}
+		}
+
+	case "d":
+		if len(m.selected) > 0 {
+			m.confirmDelete = true
+		}
+
+	case "r":
+		m.chats = findAllChats()
+		m.selected = make(map[int]bool)
+		m.cursor = 0
+		m.scrollOffset = 0
+		m.error = ""
+		m.deleted = 0
+		m.copiedMsg = ""
+		m.rebuildGroupRows()
+
+	case "c":
+		if m.cursor < rowCount && !m.groupRows[m.cursor].isHeader {
+			chatIdx := m.groupRows[m.cursor].chatIdx
+			if chatIdx < len(m.chats) {
+				uuid := m.chats[chatIdx].UUID
+				if err := copyToClipboard(uuid); err != nil {
+					m.error = fmt.Sprintf("Failed to copy: %v", err)
+				} else {
+					m.copyTimer++
+					currentTimer := m.copyTimer
+					m.copiedMsg = fmt.Sprintf("Chat UUID copied: %s", uuid)
+					m.error = ""
+					m.deleted = 0
+					return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+						return clearCopiedMsg{id: currentTimer}
+					})
+				}
+			}
+		}
+	}
+
+	return m, nil
+}
+
+func (m *model) adjustScrollGrouped() {
+	visibleHeight := m.visibleHeight()
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	} else if m.cursor >= m.scrollOffset+visibleHeight {
+		m.scrollOffset = m.cursor - visibleHeight + 1
+	}
+}
+
+// selectedCountForProject returns how many chats in a project are selected.
+func (m model) selectedCountForProject(project string) (selected, total int) {
+	for i, chat := range m.chats {
+		if chat.Project == project {
+			total++
+			if m.selected[i] {
+				selected++
+			}
+		}
+	}
+	return
+}
+
+func (m model) viewGrouped() string {
+	if len(m.chats) == 0 {
+		return activeTabStyle.Render("No chats found.") + "\n\nPress q to quit.\n"
+	}
+
+	width := m.width
+	if width < 75 {
+		width = 75
+	}
+
+	compact := width < compactModeWidth
+
+	// Column widths for chat rows (indented by 2 for nesting)
+	var timestampWidth, versionWidth, fixedWidth int
+	if compact {
+		timestampWidth = 11
+		versionWidth = 0
+		fixedWidth = 4 + 2 + timestampWidth + 5 + 5 // indicator + indent + ts + lines + gaps
+	} else {
+		timestampWidth = 19
+		versionWidth = 8
+		fixedWidth = 46 // indicator(4) + indent(2) + ts(19) + version(8) + lines(5) + gaps(8)
+	}
+
+	linesWidth := 5
+	remaining := width - fixedWidth
+	titleWidth := remaining * 65 / 100 // more title space since project is in header
+	if titleWidth < 30 {
+		titleWidth = 30
+	}
+
+	var s strings.Builder
+
+	// Header
+	s.WriteString(m.renderTabBar())
+	s.WriteString("\n")
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
+	s.WriteString("\n")
+
+	// Thin column header for grouped view
+	header := fmt.Sprintf("    %-*s", width-4, "PROJECT / CHAT")
+	s.WriteString(dimStyle.Render(header))
+	s.WriteString("\n")
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
+	s.WriteString("\n")
+
+	// Rows
+	visibleHeight := m.visibleHeight()
+	rowCount := len(m.groupRows)
+
+	start := m.scrollOffset
+	end := start + visibleHeight
+	if end > rowCount {
+		end = rowCount
+	}
+
+	for i := start; i < end; i++ {
+		row := m.groupRows[i]
+
+		if row.isHeader {
+			// Project header row
+			sel, total := m.selectedCountForProject(row.project)
+			arrow := "▸"
+			if m.expandedProjects[row.project] {
+				arrow = "▾"
+			}
+
+			// Selection indicator for project
+			indicator := "[ ]"
+			if sel == total && total > 0 {
+				indicator = "[✓]"
+			} else if sel > 0 {
+				indicator = "[~]"
+			}
+
+			projectClean := strings.NewReplacer("\n", " ").Replace(row.project)
+			countInfo := dimStyle.Render(fmt.Sprintf("(%d chats, %d selected)", total, sel))
+			line := fmt.Sprintf("%s %s %s  %s", indicator, arrow, projectClean, countInfo)
+
+			// Pad to full width
+			lineWidth := lipgloss.Width(line)
+			if lineWidth < width {
+				line += strings.Repeat(" ", width-lineWidth)
+			}
+
+			style := lipgloss.NewStyle()
+			if sel > 0 && sel == total {
+				style = selectedStyle
+			}
+			if i == m.cursor {
+				style = cursorStyle
+			}
+			s.WriteString(style.Render(line))
+			s.WriteString("\n")
+		} else {
+			// Chat row (indented under project)
+			chat := m.chats[row.chatIdx]
+
+			var timestamp string
+			if compact {
+				if len(chat.Timestamp) >= 16 {
+					timestamp = chat.Timestamp[5:16]
+				} else {
+					timestamp = runewidth.Truncate(chat.Timestamp, timestampWidth, "")
+				}
+			} else {
+				timestamp = runewidth.Truncate(chat.Timestamp, timestampWidth, "")
+			}
+
+			var version string
+			if versionWidth > 0 {
+				version = runewidth.Truncate(chat.Version, versionWidth-1, "")
+			}
+			var lines string
+			switch {
+			case chat.LineCount == 0:
+				lines = "-"
+			case chat.LineCount >= 10000:
+				lines = fmt.Sprintf("%dk", chat.LineCount/1000)
+			default:
+				lines = fmt.Sprintf("%d", chat.LineCount)
+			}
+
+			titleClean := strings.NewReplacer("\n", " ").Replace(chat.Title)
+			title := runewidth.Truncate(titleClean, titleWidth, "..")
+
+			indicator := "[ ]"
+			if m.selected[row.chatIdx] {
+				indicator = "[✓]"
+			}
+
+			var line string
+			if compact {
+				lineFmt := fmt.Sprintf("%%s  %%-*s  %%-%ds  %%-%ds", linesWidth, titleWidth)
+				line = fmt.Sprintf(lineFmt, indicator, timestampWidth, timestamp, lines, title)
+			} else {
+				lineFmt := fmt.Sprintf("%%s  %%-*s  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth)
+				line = fmt.Sprintf(lineFmt, indicator, timestampWidth, timestamp, version, lines, title)
+			}
+
+			style := lipgloss.NewStyle()
+			if m.selected[row.chatIdx] {
+				style = selectedStyle
+			}
+			if i == m.cursor {
+				style = cursorStyle
+			}
+			s.WriteString(style.Render(line))
+			s.WriteString("\n")
+		}
+	}
+
+	// Scroll indicator
+	if rowCount > visibleHeight {
+		scrollInfo := fmt.Sprintf("[%d-%d/%d]", start+1, end, rowCount)
+		s.WriteString(dimStyle.Render(scrollInfo))
+		s.WriteString("\n")
+	}
+
+	// Bottom separator
+	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
+	s.WriteString("\n")
+
+	// Status messages
+	if m.error != "" {
+		s.WriteString(errorStyle.Render("Error: " + m.error))
+		s.WriteString("\n")
+	} else if m.deleted > 0 {
+		s.WriteString(successStyle.Render(fmt.Sprintf("✓ Deleted %d chat(s)", m.deleted)))
+		s.WriteString("\n")
+	} else if m.copiedMsg != "" {
+		s.WriteString(successStyle.Render("✓ " + m.copiedMsg))
+		s.WriteString("\n")
+	}
+
+	// Help / Confirmation dialog
+	if m.confirmDelete {
+		s.WriteString(errorStyle.Render(fmt.Sprintf("Delete %d chat(s)?", len(m.selected))))
+		s.WriteString(" ")
+		s.WriteString(helpStyle.Render("[ENTER=Yes] [ESC=No]"))
+		s.WriteString("\n")
+	} else if compact {
+		actionsLine := "Actions:    <Space>: Toggle | Enter: Expand | a: Toggle All | d: Delete | c: Copy | r: Refresh | q: Quit"
+		navLine := "Navigation: ↑/↓: Items | ←/→: Tabs | f/b: PgDn/PgUp | F/B: Half | g/G: Home/End"
+		s.WriteString(helpStyle.Render(actionsLine))
+		s.WriteString("\n")
+		s.WriteString(helpStyle.Render(navLine))
+		s.WriteString("\n")
+	} else {
+		help := "↑/↓:Items | ←/→:Tabs | Enter:Expand | <Space>:Toggle | a:Toggle All | c:Copy ID | d:Delete | r:Refresh | q/esc:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}

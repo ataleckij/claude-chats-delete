@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 )
@@ -210,6 +211,206 @@ func TestView_CompactMode_TwoHelpLines(t *testing.T) {
 	got := viewLineCount(m.View())
 	if got != expected {
 		t.Errorf("compact mode two help lines: expected %d lines, got %d", expected, got)
+	}
+}
+
+// makeTestChatsMultiProject creates chats spread across multiple projects.
+// Pattern: chats 0..perProject-1 in "project-A", next perProject in "project-B", etc.
+func makeTestChatsMultiProject(projectCount, perProject int) []Chat {
+	projects := []string{"project-A", "project-B", "project-C", "project-D", "project-E"}
+	var chats []Chat
+	for p := 0; p < projectCount && p < len(projects); p++ {
+		for c := 0; c < perProject; c++ {
+			idx := p*perProject + c
+			chats = append(chats, Chat{
+				UUID:      fmt.Sprintf("uuid-%d", idx),
+				Title:     fmt.Sprintf("Chat %d in %s", c, projects[p]),
+				Timestamp: fmt.Sprintf("2026-01-%02d 00:00:00", 10-p), // newer projects first
+				Project:   projects[p],
+				Version:   "2.1.49",
+				LineCount: 5,
+			})
+		}
+	}
+	return chats
+}
+
+func makeGroupedModel(chats []Chat, width, height int) model {
+	m := model{
+		chats:            chats,
+		selected:         make(map[int]bool),
+		width:            width,
+		height:           height,
+		grouped:          true,
+		expandedProjects: make(map[string]bool),
+	}
+	m.rebuildGroupRows()
+	return m
+}
+
+// --- Grouped view tests ---
+
+func TestViewGrouped_EmptyChats(t *testing.T) {
+	m := makeGroupedModel(nil, normalWidth, 20)
+	output := stripANSI(m.View())
+	got := strings.Count(output, "\n")
+	if got != 3 {
+		t.Errorf("grouped empty state: expected 3 lines, got %d\noutput: %q", got, output)
+	}
+}
+
+func TestViewGrouped_CollapsedProjects_LineCount(t *testing.T) {
+	// 3 projects, all collapsed = 3 header rows
+	chats := makeTestChatsMultiProject(3, 4)
+	m := makeGroupedModel(chats, normalWidth, 30)
+	// Layout: header(4) + rows(3) + scroll(0) + status(0) + footer(2) = 9
+	expected := fixedHeaderLines + 3 + 0 + 0 + fixedFooterLines
+	got := viewLineCount(m.View())
+	if got != expected {
+		t.Errorf("grouped collapsed: expected %d lines, got %d", expected, got)
+	}
+}
+
+func TestViewGrouped_ExpandedProject_LineCount(t *testing.T) {
+	// 2 projects with 3 chats each, one expanded
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+	m.expandedProjects["project-A"] = true
+	m.rebuildGroupRows()
+	// Rows: header-A(1) + 3 chats + header-B(1) = 5 rows
+	expected := fixedHeaderLines + 5 + 0 + 0 + fixedFooterLines
+	got := viewLineCount(m.View())
+	if got != expected {
+		t.Errorf("grouped expanded: expected %d lines, got %d", expected, got)
+	}
+}
+
+func TestViewGrouped_WithScroll(t *testing.T) {
+	// Many projects to trigger scroll
+	chats := makeTestChatsMultiProject(5, 4)
+	m := makeGroupedModel(chats, normalWidth, 15)
+	// Expand all projects: 5 headers + 20 chats = 25 rows
+	for _, name := range []string{"project-A", "project-B", "project-C", "project-D", "project-E"} {
+		m.expandedProjects[name] = true
+	}
+	m.rebuildGroupRows()
+	vh := m.visibleHeight() // 15 - 9 = 6
+	// 25 rows > 6 visible → scroll indicator
+	expected := fixedHeaderLines + vh + 1 + 0 + fixedFooterLines
+	got := viewLineCount(m.View())
+	if got != expected {
+		t.Errorf("grouped scroll: expected %d lines, got %d (vh=%d, rows=%d)",
+			expected, got, vh, len(m.groupRows))
+	}
+}
+
+func TestViewGrouped_ConfirmDialog_ReplacesHelp(t *testing.T) {
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+	m.selected[0] = true
+	m.confirmDelete = true
+	// Same line count as without confirm (dialog replaces help)
+	expected := fixedHeaderLines + 2 + 0 + 0 + fixedFooterLines
+	got := viewLineCount(m.View())
+	if got != expected {
+		t.Errorf("grouped confirm: expected %d lines, got %d", expected, got)
+	}
+}
+
+func TestUpdateGrouped_SpaceOnHeaderTogglesProject(t *testing.T) {
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+
+	// Cursor is on first project header (index 0)
+	// Press space to select all chats in project-A
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}}
+	result, _ := m.updateGrouped(keyMsg)
+	m = result.(model)
+
+	// project-A has chats at indices 0, 1, 2
+	for _, idx := range []int{0, 1, 2} {
+		if !m.selected[idx] {
+			t.Errorf("chat %d should be selected after space on project header", idx)
+		}
+	}
+	// project-B chats should NOT be selected
+	for _, idx := range []int{3, 4, 5} {
+		if m.selected[idx] {
+			t.Errorf("chat %d should NOT be selected (different project)", idx)
+		}
+	}
+
+	// Press space again to deselect all in project-A
+	result, _ = m.updateGrouped(keyMsg)
+	m = result.(model)
+	if len(m.selected) != 0 {
+		t.Errorf("expected all deselected, got %d selected", len(m.selected))
+	}
+}
+
+func TestUpdateGrouped_EnterExpandCollapse(t *testing.T) {
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+
+	// Initially 2 rows (2 collapsed headers)
+	if len(m.groupRows) != 2 {
+		t.Fatalf("expected 2 collapsed rows, got %d", len(m.groupRows))
+	}
+
+	// Press enter to expand first project
+	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
+	result, _ := m.updateGrouped(enterMsg)
+	m = result.(model)
+
+	// Now: header-A(1) + 3 chats + header-B(1) = 5 rows
+	if len(m.groupRows) != 5 {
+		t.Errorf("expected 5 rows after expand, got %d", len(m.groupRows))
+	}
+	// Cursor should still be on the project-A header (index 0)
+	if m.cursor != 0 {
+		t.Errorf("cursor should be 0 after expand, got %d", m.cursor)
+	}
+
+	// Press enter again to collapse
+	result, _ = m.updateGrouped(enterMsg)
+	m = result.(model)
+
+	if len(m.groupRows) != 2 {
+		t.Errorf("expected 2 rows after collapse, got %d", len(m.groupRows))
+	}
+}
+
+func TestUpdateGrouped_EnterOnChatRowDoesNothing(t *testing.T) {
+	chats := makeTestChatsMultiProject(1, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+	m.expandedProjects["project-A"] = true
+	m.rebuildGroupRows()
+
+	// Move cursor to first chat row (index 1)
+	m.cursor = 1
+	enterMsg := tea.KeyMsg{Type: tea.KeyEnter}
+	result, _ := m.updateGrouped(enterMsg)
+	m = result.(model)
+
+	// Should still have 4 rows (1 header + 3 chats), nothing changed
+	if len(m.groupRows) != 4 {
+		t.Errorf("enter on chat row should not change rows, got %d", len(m.groupRows))
+	}
+}
+
+func TestViewGrouped_ProjectWithNewline(t *testing.T) {
+	chats := []Chat{
+		{UUID: "u1", Title: "test", Timestamp: "2026-01-01 00:00:00",
+			Project: "proj\nwith newline", Version: "2.1.49", LineCount: 1},
+	}
+	m := makeGroupedModel(chats, normalWidth, 20)
+	output := stripANSI(m.View())
+	// 1 collapsed header row
+	expected := fixedHeaderLines + 1 + 0 + 0 + fixedFooterLines
+	got := strings.Count(output, "\n")
+	if got != expected {
+		t.Errorf("grouped project with newline: expected %d lines, got %d\noutput:\n%s",
+			expected, got, output)
 	}
 }
 

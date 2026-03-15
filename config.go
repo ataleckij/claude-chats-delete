@@ -13,6 +13,7 @@ import (
 type Config struct {
 	ClaudeDir              string `json:"claude_dir"`
 	AutoUpdates            bool   `json:"auto_updates"`
+	GroupByProject         bool   `json:"group_by_project"`
 	LastUpdateCheck        int64  `json:"last_update_check"`
 	UpdateCheckIntervalHrs int    `json:"update_check_interval_hours"`
 }
