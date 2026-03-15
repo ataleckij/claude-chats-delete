@@ -405,7 +405,7 @@ func TestFindRelatedFiles_AgentMemory(t *testing.T) {
 
 	// JSONL referencing an agent_id
 	jsonlContent := "{\"type\":\"snapshot\"}\n" +
-		"{\"type\":\"user\",\"message\":{\"content\":\"hi\"},\"isMeta\":false,\"agent_id\":\"" + agentID + "\"}\n"
+		"{\"type\":\"user\",\"message\":{\"content\":\"hi\"},\"isMeta\":false,\"agentId\":\"" + agentID + "\"}\n"
 	if err := os.WriteFile(filepath.Join(projDir, uuid+".jsonl"), []byte(jsonlContent), 0644); err != nil {
 		t.Fatal(err)
 	}

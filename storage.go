@@ -446,7 +446,7 @@ func parseAgentIDs(chatFile string) []string {
 	scanner.Buffer(buf, len(buf))
 	for scanner.Scan() {
 		var msg struct {
-			AgentID string `json:"agent_id"`
+			AgentID string `json:"agentId"`
 		}
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err == nil {
 			if msg.AgentID != "" && !seen[msg.AgentID] {
