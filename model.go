@@ -368,6 +368,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "d":
+			if len(m.selected) == 0 && m.cursor < len(m.chats) {
+				m.selected[m.cursor] = true
+			}
 			if len(m.selected) > 0 {
 				m.confirmDelete = true
 			}
@@ -823,6 +826,12 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "d":
+		if len(m.selected) == 0 && m.cursor < len(m.groupRows) {
+			row := m.groupRows[m.cursor]
+			if !row.isHeader {
+				m.selected[row.chatIdx] = true
+			}
+		}
 		if len(m.selected) > 0 {
 			m.confirmDelete = true
 		}
