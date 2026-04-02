@@ -141,12 +141,15 @@ func getChatTitle(jsonlFile string) string {
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
 	scanner.Buffer(buf, len(buf))
-	lineNum := 0
+	firstLine := true
+
 	var firstSummary string
+	var firstUserMessage string
+	var lastRenameName string
 
 	for scanner.Scan() {
-		lineNum++
-		if lineNum == 1 {
+		if firstLine {
+			firstLine = false
 			continue // Skip first line (file-history-snapshot)
 		}
 
@@ -155,28 +158,34 @@ func getChatTitle(jsonlFile string) string {
 			continue
 		}
 
+		// Track custom title set via /rename — last one wins
+		if msg.Type == "custom-title" && msg.CustomTitle != "" {
+			lastRenameName = msg.CustomTitle
+		}
+
 		// Save first summary as fallback
 		if msg.Type == "summary" && msg.Summary != "" && firstSummary == "" {
 			firstSummary = msg.Summary
 		}
 
 		// Skip meta messages and find first real user message
-		if msg.Type == "user" && !msg.IsMeta {
+		if msg.Type == "user" && !msg.IsMeta && firstUserMessage == "" {
 			content := msg.Message.Content
 			// Clean up system tags
 			content = cleanSystemTags(content)
 			if content != "" {
-				return content
+				firstUserMessage = content
 			}
-		}
-
-		// Stop after checking reasonable number of lines
-		if lineNum > 100 {
-			break
 		}
 	}
 
-	// Fallback to summary if no user message found
+	// Priority: rename > first user message > summary > fallback
+	if lastRenameName != "" {
+		return lastRenameName
+	}
+	if firstUserMessage != "" {
+		return firstUserMessage
+	}
 	if firstSummary != "" {
 		return firstSummary
 	}

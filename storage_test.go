@@ -180,6 +180,34 @@ func TestGetChatTitle(t *testing.T) {
 			},
 			want: "fallback summary",
 		},
+		{
+			name: "custom-title takes priority over user message",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"original question"},"isMeta":false}`,
+				`{"type":"custom-title","customTitle":"My Custom Name","sessionId":"abc"}`,
+			},
+			want: "My Custom Name",
+		},
+		{
+			name: "last custom-title wins when renamed multiple times",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"original question"},"isMeta":false}`,
+				`{"type":"custom-title","customTitle":"first name","sessionId":"abc"}`,
+				`{"type":"custom-title","customTitle":"final name","sessionId":"abc"}`,
+			},
+			want: "final name",
+		},
+		{
+			name: "custom-title with empty value is ignored",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"real question"},"isMeta":false}`,
+				`{"type":"custom-title","customTitle":"","sessionId":"abc"}`,
+			},
+			want: "real question",
+		},
 	}
 
 	for _, tt := range tests {
