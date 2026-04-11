@@ -66,7 +66,7 @@ claude-chats
 | `SPACE` | Select/deselect current chat |
 | `a` | Select/deselect all chats |
 | `c` | Copy chat UUID to clipboard |
-| `d` | Delete selected chats (with confirmation) |
+| `d` | Delete selected chats, or the chat under cursor if none are selected (with confirmation) |
 | `r` | Refresh chat list |
 | `q` or `Ctrl+C` | Quit |
 
@@ -75,9 +75,10 @@ claude-chats
 ### Deletion Confirmation
 
 When you press `d`:
-1. Confirmation dialog appears
-2. Press `ENTER` to confirm deletion
-3. Press `ESC` or `n` to cancel
+1. If nothing is selected, the chat under the cursor is auto-selected for this single action (in grouped view, pressing `d` on a project header auto-selects every chat in that project)
+2. Confirmation dialog appears
+3. Press `ENTER` to confirm deletion
+4. Press `ESC` or `n` to cancel — if the selection was made automatically, it is reverted so the next `d` acts on the new cursor position
 
 All related files are deleted:
 - Main chat file (`.jsonl`)
