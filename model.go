@@ -106,6 +106,11 @@ type model struct {
 	deleteTimer   int // Track active delete message timer
 	copyTimer     int // Track active copy message timer
 
+	// True when the current m.selected was filled automatically by pressing
+	// d with no prior selection. On confirm cancel we revert the auto-selection
+	// so the selection state doesn't leak into the next d gesture.
+	autoSelected bool
+
 	// Settings tab
 	settingsCursor int
 
@@ -230,6 +235,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.deleteSelectedChats()
 			case "esc", "n":
 				m.confirmDelete = false
+				if m.autoSelected {
+					m.selected = make(map[int]bool)
+					m.autoSelected = false
+				}
 			}
 			return m, nil
 		}
@@ -348,6 +357,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.adjustScroll()
 
 		case " ":
+			// Explicit toggle — user now owns the selection.
+			m.autoSelected = false
 			if m.selected[m.cursor] {
 				delete(m.selected, m.cursor)
 			} else {
@@ -359,6 +370,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.chats) == 0 {
 				return m, nil // Nothing to select
 			}
+			m.autoSelected = false
 			if len(m.selected) == len(m.chats) {
 				m.selected = make(map[int]bool)
 			} else {
@@ -368,6 +380,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "d":
+			// Explicit selection wins: if anything is already selected
+			// (via Space or a), delete those. Otherwise auto-select the
+			// chat under the cursor for this single gesture.
+			if len(m.selected) == 0 && m.cursor < len(m.chats) {
+				m.selected[m.cursor] = true
+				m.autoSelected = true
+			}
 			if len(m.selected) > 0 {
 				m.confirmDelete = true
 			}
@@ -376,6 +395,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Refresh
 			m.chats = findAllChats()
 			m.selected = make(map[int]bool)
+			m.autoSelected = false
 			m.cursor = 0
 			m.scrollOffset = 0
 			m.error = ""
@@ -408,6 +428,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		currentTimer := m.deleteTimer
 		m.chats = findAllChats()
 		m.selected = make(map[int]bool)
+		m.autoSelected = false
 		m.cursor = 0
 		m.scrollOffset = 0
 		m.confirmDelete = false
@@ -779,6 +800,7 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case " ":
 		if m.cursor < rowCount {
+			m.autoSelected = false
 			row := m.groupRows[m.cursor]
 			if row.isHeader {
 				// Toggle all chats in this project
@@ -814,6 +836,7 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.chats) == 0 {
 			return m, nil
 		}
+		m.autoSelected = false
 		if len(m.selected) == len(m.chats) {
 			m.selected = make(map[int]bool)
 		} else {
@@ -823,6 +846,22 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case "d":
+		// Explicit selection wins: only auto-select when nothing is selected.
+		// On a project header we pick every chat in that project (works for
+		// both expanded and collapsed groups). On a chat row we pick just it.
+		if len(m.selected) == 0 && m.cursor < len(m.groupRows) {
+			row := m.groupRows[m.cursor]
+			if row.isHeader {
+				for _, idx := range m.chatIndicesForProject(row.project) {
+					m.selected[idx] = true
+				}
+			} else {
+				m.selected[row.chatIdx] = true
+			}
+			if len(m.selected) > 0 {
+				m.autoSelected = true
+			}
+		}
 		if len(m.selected) > 0 {
 			m.confirmDelete = true
 		}
@@ -830,6 +869,7 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.chats = findAllChats()
 		m.selected = make(map[int]bool)
+		m.autoSelected = false
 		m.cursor = 0
 		m.scrollOffset = 0
 		m.error = ""

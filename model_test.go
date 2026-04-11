@@ -414,6 +414,233 @@ func TestViewGrouped_ProjectWithNewline(t *testing.T) {
 	}
 }
 
+// send drives the model through m.Update with the given key message and
+// returns the resulting model, panicking on the (unused) command.
+func send(m model, msg tea.KeyMsg) model {
+	next, _ := m.Update(msg)
+	return next.(model)
+}
+
+func keyRune(r rune) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+}
+
+// Regression: d → esc must fully clear auto-selection so the next d
+// acts on the chat under the new cursor position, not the stale one.
+func TestUpdateD_AutoSelectClearsOnCancel(t *testing.T) {
+	chats := makeTestChats(3)
+	m := makeTestModel(chats, normalWidth, 20)
+
+	// Press d on chat 0: auto-select + confirm dialog.
+	m = send(m, keyRune('d'))
+	if !m.confirmDelete {
+		t.Fatal("confirm dialog not shown after d")
+	}
+	if !m.selected[0] {
+		t.Fatal("chat 0 not auto-selected after d")
+	}
+	if !m.autoSelected {
+		t.Fatal("autoSelected flag not set after auto-select")
+	}
+
+	// Esc cancels and must revert the auto-selection.
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.confirmDelete {
+		t.Fatal("confirm still shown after esc")
+	}
+	if len(m.selected) != 0 {
+		t.Fatalf("auto-selection leaked after esc: %v", m.selected)
+	}
+	if m.autoSelected {
+		t.Fatal("autoSelected flag not cleared after esc")
+	}
+
+	// Move cursor to chat 1.
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d after down, want 1", m.cursor)
+	}
+
+	// Press d again: must auto-select the new chat, not the stale one.
+	m = send(m, keyRune('d'))
+	if !m.confirmDelete {
+		t.Fatal("second confirm not shown")
+	}
+	if m.selected[0] {
+		t.Fatal("chat 0 still selected on second d (regression)")
+	}
+	if !m.selected[1] {
+		t.Fatal("chat 1 not auto-selected on second d")
+	}
+}
+
+// Explicit selection via Space must win over cursor position: d with an
+// existing selection deletes the explicit set, ignoring where the cursor
+// is, and esc must not wipe the explicit selection.
+func TestUpdateD_ExplicitSelectionWinsOverCursor(t *testing.T) {
+	chats := makeTestChats(3)
+	m := makeTestModel(chats, normalWidth, 20)
+
+	// Space on chat 0: explicit selection, flag stays false.
+	m = send(m, keyRune(' '))
+	if !m.selected[0] {
+		t.Fatal("chat 0 not selected by space")
+	}
+	if m.autoSelected {
+		t.Fatal("autoSelected must not be set by space")
+	}
+
+	// Move cursor to chat 2.
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.cursor != 2 {
+		t.Fatalf("cursor = %d, want 2", m.cursor)
+	}
+
+	// d should open confirm for the already-selected chat 0, not add chat 2.
+	m = send(m, keyRune('d'))
+	if !m.confirmDelete {
+		t.Fatal("confirm not shown")
+	}
+	if !m.selected[0] {
+		t.Fatal("chat 0 dropped from selection on d")
+	}
+	if m.selected[2] {
+		t.Fatal("chat 2 auto-added despite explicit selection — rule broken")
+	}
+	if m.autoSelected {
+		t.Fatal("autoSelected flag must not be set when explicit selection exists")
+	}
+
+	// Esc must not wipe the explicit selection.
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if !m.selected[0] {
+		t.Fatal("explicit selection wiped on esc — rule broken")
+	}
+}
+
+// Grouped view: d on a collapsed project header must auto-select every
+// chat in that project and open the confirm dialog.
+func TestUpdateGroupedD_HeaderAutoSelectsProjectChats(t *testing.T) {
+	// 2 projects, 3 chats each; cursor starts on header-A (row 0).
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+
+	m = send(m, keyRune('d'))
+
+	if !m.confirmDelete {
+		t.Fatal("confirm dialog not shown after d on project header")
+	}
+	if !m.autoSelected {
+		t.Fatal("autoSelected flag not set after header auto-select")
+	}
+	// project-A owns chat indices 0, 1, 2.
+	for _, idx := range []int{0, 1, 2} {
+		if !m.selected[idx] {
+			t.Errorf("chat %d (project-A) not auto-selected", idx)
+		}
+	}
+	// project-B chats must NOT be selected.
+	for _, idx := range []int{3, 4, 5} {
+		if m.selected[idx] {
+			t.Errorf("chat %d (project-B) auto-selected; header should only pick its own project", idx)
+		}
+	}
+}
+
+// Grouped view: d on a header → esc must revert the auto-selection,
+// so the next d on another header acts on the new project only.
+func TestUpdateGroupedD_HeaderAutoSelectClearsOnCancel(t *testing.T) {
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+
+	// d on header-A → auto-select project-A.
+	m = send(m, keyRune('d'))
+	if len(m.selected) != 3 || !m.autoSelected {
+		t.Fatalf("setup failed: selected=%v autoSelected=%v", m.selected, m.autoSelected)
+	}
+
+	// Esc cancels.
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.confirmDelete {
+		t.Fatal("confirm still shown after esc")
+	}
+	if len(m.selected) != 0 {
+		t.Fatalf("header auto-selection leaked after esc: %v", m.selected)
+	}
+	if m.autoSelected {
+		t.Fatal("autoSelected flag not cleared after esc")
+	}
+
+	// Move cursor to header-B and press d again.
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = send(m, keyRune('d'))
+
+	// Only project-B chats (3, 4, 5) should be selected now.
+	for _, idx := range []int{0, 1, 2} {
+		if m.selected[idx] {
+			t.Errorf("project-A chat %d still selected on second d (regression)", idx)
+		}
+	}
+	for _, idx := range []int{3, 4, 5} {
+		if !m.selected[idx] {
+			t.Errorf("project-B chat %d not auto-selected on second d", idx)
+		}
+	}
+}
+
+// Grouped view: explicit Space-selection on one project header must survive
+// pressing d on a different project's header. d with non-empty selection
+// ignores the cursor and shows confirm for the existing selection.
+func TestUpdateGroupedD_ExplicitWinsOnHeader(t *testing.T) {
+	chats := makeTestChatsMultiProject(2, 3)
+	m := makeGroupedModel(chats, normalWidth, 30)
+
+	// Space on header-A toggles all of project-A's chats explicitly.
+	m = send(m, keyRune(' '))
+	for _, idx := range []int{0, 1, 2} {
+		if !m.selected[idx] {
+			t.Fatalf("setup: chat %d not selected by space", idx)
+		}
+	}
+	if m.autoSelected {
+		t.Fatal("space must not set autoSelected")
+	}
+
+	// Move cursor to header-B.
+	m = send(m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.cursor != 1 {
+		t.Fatalf("cursor = %d, want 1", m.cursor)
+	}
+
+	// d opens confirm for the already-selected project-A chats.
+	m = send(m, keyRune('d'))
+	if !m.confirmDelete {
+		t.Fatal("confirm not shown")
+	}
+	if m.autoSelected {
+		t.Fatal("autoSelected must not be set when explicit selection exists")
+	}
+	for _, idx := range []int{0, 1, 2} {
+		if !m.selected[idx] {
+			t.Errorf("project-A chat %d dropped on d", idx)
+		}
+	}
+	for _, idx := range []int{3, 4, 5} {
+		if m.selected[idx] {
+			t.Errorf("project-B chat %d auto-added despite explicit selection — rule broken", idx)
+		}
+	}
+
+	// Esc must not wipe the explicit selection.
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	for _, idx := range []int{0, 1, 2} {
+		if !m.selected[idx] {
+			t.Errorf("explicit project-A chat %d wiped on esc — rule broken", idx)
+		}
+	}
+}
+
 func TestVisibleHeight(t *testing.T) {
 	tests := []struct {
 		width  int
