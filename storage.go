@@ -52,10 +52,8 @@ func findAllChats() []Chat {
 				continue
 			}
 
-			title := getChatTitle(file)
+			title, version, lineCount := scanChatMetadata(file)
 			timestamp := getChatTimestamp(file)
-			version := getChatVersion(file)
-			lineCount := countLines(file)
 
 			// TODO: Get messageCount from index if available
 			// msgCount := messageCountMap[uuid]
@@ -131,57 +129,80 @@ func cleanSystemTags(content string) string {
 	return cleaned
 }
 
-func getChatTitle(jsonlFile string) string {
+// scanChatMetadata reads a chat JSONL file in a single pass and extracts
+// display metadata (title, version, line count). Title priority matches the
+// Claude Code --resume picker: customTitle (/rename) > first user message >
+// summary fallback. Replaces three separate file scans.
+//
+// Scans the full file without an early exit: late /rename records can appear
+// at any line and lineCount needs the whole file, so any bail-out cap would
+// silently break rename detection on long sessions.
+func scanChatMetadata(jsonlFile string) (title, version string, lineCount int) {
 	file, err := os.Open(jsonlFile)
 	if err != nil {
-		return "[Error opening file]"
+		return "[Error opening file]", "", 0
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
 	scanner.Buffer(buf, len(buf))
-	lineNum := 0
-	var firstSummary string
+
+	var firstUserMsg, firstSummary, lastCustomTitle string
 
 	for scanner.Scan() {
-		lineNum++
-		if lineNum == 1 {
-			continue // Skip first line (file-history-snapshot)
-		}
+		lineCount++
 
 		var msg JSONLMessage
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
 			continue
 		}
 
-		// Save first summary as fallback
-		if msg.Type == "summary" && msg.Summary != "" && firstSummary == "" {
-			firstSummary = msg.Summary
+		if version == "" && msg.Version != "" {
+			version = msg.Version
 		}
 
-		// Skip meta messages and find first real user message
-		if msg.Type == "user" && !msg.IsMeta {
-			content := msg.Message.Content
-			// Clean up system tags
-			content = cleanSystemTags(content)
-			if content != "" {
-				return content
+		// /rename writes a dedicated record; last one wins.
+		if msg.Type == "custom-title" && msg.CustomTitle != "" {
+			lastCustomTitle = msg.CustomTitle
+			continue
+		}
+
+		if firstSummary == "" && msg.Type == "summary" && msg.Summary != "" {
+			firstSummary = msg.Summary
+			continue
+		}
+
+		if firstUserMsg == "" && msg.Type == "user" && !msg.IsMeta {
+			if c := cleanSystemTags(msg.Message.Content); c != "" {
+				firstUserMsg = c
 			}
 		}
-
-		// Stop after checking reasonable number of lines
-		if lineNum > 100 {
-			break
-		}
 	}
 
-	// Fallback to summary if no user message found
-	if firstSummary != "" {
-		return firstSummary
+	switch {
+	case lastCustomTitle != "":
+		title = lastCustomTitle
+	case firstUserMsg != "":
+		title = firstUserMsg
+	case firstSummary != "":
+		title = firstSummary
+	default:
+		title = "[No title]"
 	}
+	return
+}
 
-	return "[No title]"
+// getChatTitle returns just the title. Retained for test compatibility.
+func getChatTitle(jsonlFile string) string {
+	title, _, _ := scanChatMetadata(jsonlFile)
+	return title
+}
+
+// getChatVersion returns just the version. Retained for test compatibility.
+func getChatVersion(jsonlFile string) string {
+	_, version, _ := scanChatMetadata(jsonlFile)
+	return version
 }
 
 func getChatTimestamp(jsonlFile string) string {
@@ -190,49 +211,6 @@ func getChatTimestamp(jsonlFile string) string {
 		return "Unknown"
 	}
 	return info.ModTime().Format("2006-01-02 15:04:05")
-}
-
-func getChatVersion(jsonlFile string) string {
-	file, err := os.Open(jsonlFile)
-	if err != nil {
-		return ""
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
-	scanner.Buffer(buf, len(buf))
-	checked := 0
-	for scanner.Scan() {
-		checked++
-		var msg JSONLMessage
-		if err := json.Unmarshal(scanner.Bytes(), &msg); err == nil && msg.Version != "" {
-			return msg.Version
-		}
-		if checked >= 100 {
-			break
-		}
-	}
-
-	return ""
-}
-
-func countLines(jsonlFile string) int {
-	file, err := os.Open(jsonlFile)
-	if err != nil {
-		return 0
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
-	scanner.Buffer(buf, len(buf))
-	count := 0
-	for scanner.Scan() {
-		count++
-	}
-
-	return count
 }
 
 func getSlugFromChat(jsonlFile string) string {

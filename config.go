@@ -33,12 +33,13 @@ type Chat struct {
 
 // JSONLMessage represents a message in the JSONL file
 type JSONLMessage struct {
-	Type    string `json:"type"`
-	Version string `json:"version"`
-	Slug    string `json:"slug"`
-	IsMeta  bool   `json:"isMeta"`
-	Summary string `json:"summary"`
-	Message struct {
+	Type        string `json:"type"`
+	Version     string `json:"version"`
+	Slug        string `json:"slug"`
+	IsMeta      bool   `json:"isMeta"`
+	Summary     string `json:"summary"`
+	CustomTitle string `json:"customTitle"`
+	Message     struct {
 		Content string `json:"content"`
 	} `json:"message"`
 }

@@ -180,6 +180,45 @@ func TestGetChatTitle(t *testing.T) {
 			},
 			want: "fallback summary",
 		},
+		{
+			name: "custom-title from /rename overrides first user message",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"first prompt text"},"isMeta":false}`,
+				`{"type":"custom-title","customTitle":"renamed session","sessionId":"abc"}`,
+			},
+			want: "renamed session",
+		},
+		{
+			name: "custom-title overrides summary fallback",
+			lines: []string{
+				line1,
+				`{"type":"summary","summary":"auto summary"}`,
+				`{"type":"custom-title","customTitle":"manual name","sessionId":"abc"}`,
+			},
+			want: "manual name",
+		},
+		{
+			name: "multiple renames: last custom-title wins",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"hi"},"isMeta":false}`,
+				`{"type":"custom-title","customTitle":"first rename","sessionId":"abc"}`,
+				`{"type":"assistant","message":{"content":"ok"}}`,
+				`{"type":"custom-title","customTitle":"second rename","sessionId":"abc"}`,
+				`{"type":"custom-title","customTitle":"final name","sessionId":"abc"}`,
+			},
+			want: "final name",
+		},
+		{
+			name: "empty custom-title is ignored",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"real question"},"isMeta":false}`,
+				`{"type":"custom-title","customTitle":"","sessionId":"abc"}`,
+			},
+			want: "real question",
+		},
 	}
 
 	for _, tt := range tests {
@@ -194,6 +233,28 @@ func TestGetChatTitle(t *testing.T) {
 				t.Errorf("getChatTitle() returned title with newline: %q", got)
 			}
 		})
+	}
+}
+
+func TestScanChatMetadata(t *testing.T) {
+	// Locks in the 3-in-1 contract: title, version, lineCount all returned
+	// from a single call in one file pass.
+	lines := []string{
+		`{"type":"file-history-snapshot"}`,
+		`{"type":"user","message":{"content":"hello"},"isMeta":false,"version":"2.1.76"}`,
+		`{"type":"custom-title","customTitle":"renamed","sessionId":"x"}`,
+	}
+	path := writeTempJSONL(t, lines)
+	title, version, lineCount := scanChatMetadata(path)
+
+	if title != "renamed" {
+		t.Errorf("title = %q, want %q", title, "renamed")
+	}
+	if version != "2.1.76" {
+		t.Errorf("version = %q, want %q", version, "2.1.76")
+	}
+	if lineCount != 3 {
+		t.Errorf("lineCount = %d, want 3", lineCount)
 	}
 }
 
