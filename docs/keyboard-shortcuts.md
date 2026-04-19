@@ -28,7 +28,9 @@ For users with large chat histories (hundreds of sessions):
 ## Action Commands
 
 - **`c`** - Copy current chat UUID to clipboard
-- **`d`** - Delete selected chats (shows confirmation dialog)
+- **`d`** - Delete selected chats; if nothing is selected, the chat under the
+  cursor is auto-selected for this single action. In grouped view, pressing
+  `d` on a project header auto-selects every chat in that project.
 - **`r`** - Refresh chat list (reload from disk)
 - **`q`** or **`Ctrl+C`** - Quit application
 
@@ -36,7 +38,9 @@ For users with large chat histories (hundreds of sessions):
 
 When deleting (after pressing `d`):
 - **`ENTER`** - Confirm deletion
-- **`ESC`** or **`n`** - Cancel deletion
+- **`ESC`** or **`n`** - Cancel deletion (if the selection was made
+  automatically by `d`, it is reverted so the next `d` acts on the new cursor
+  position; explicit `Space` selections are preserved)
 
 ## Tips for Power Users
 

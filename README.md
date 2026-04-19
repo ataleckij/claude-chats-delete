@@ -2,24 +2,21 @@
 
 **Delete and remove Claude Code chat sessions** with an interactive terminal UI.
 
-[YouTube Presentation](https://youtu.be/FFmKh5kCyuE) for [BridgeMind Vibeathon](https://www.bridgemind.ai/vibeathon)
+[YouTube Presentation](https://youtu.be/FFmKh5kCyuE)
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code v2.1.114.
+Tested with Claude Code **v2.1.114**.
 
 <img src="./demo.gif" />
 
 ## Features
 
-- Browse all chat sessions across projects
-- View chat titles, timestamps, versions, line counts, and projects
+- Browse chat sessions across all projects, with optional grouped-by-project view
+- Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, todos, tasks, plans, agent memory, and more)
 - Copy chat UUID to clipboard
-- Multiple selection with visual indicators
-- Delete chats with all related files (subagents, tool-results, file-history, debug, todos, session-env, tasks, plans)
-- Keyboard-driven navigation (vim-style support with fast page scrolling)
-- Color-coded interface
-- Auto-update on startup (checks GitHub for new releases)
+- Keyboard-driven interface with vim keys and fast page navigation
+- Auto-update via GitHub releases
 
 ## Installation
 
@@ -49,18 +46,6 @@ claude-chats
 
 ### Keyboard Controls
 
-#### Navigation
-| Key | Action |
-|-----|--------|
-| `↑/↓` or `k/j` | Navigate up/down |
-| `f` or `PgDn` | Page down |
-| `b` or `PgUp` | Page up |
-| `F` | Half page down |
-| `B` | Half page up |
-| `g` or `Home` | Jump to first chat |
-| `G` or `End` | Jump to last chat |
-
-#### Actions
 | Key | Action |
 |-----|--------|
 | `SPACE` | Select/deselect current chat |
@@ -69,87 +54,29 @@ claude-chats
 | `d` | Delete selected chats, or the chat under cursor if none are selected (with confirmation) |
 | `r` | Refresh chat list |
 | `q` or `Ctrl+C` | Quit |
+| `↑/↓`, `k/j`, `f/b`, `F/B`, `g/G` | Navigate (arrows, vim keys, page, half-page, home/end) |
 
-> **Tip for Power Users:** Working with hundreds of chats? See [Keyboard Shortcuts Guide](docs/keyboard-shortcuts.md) for advanced navigation tips.
-
-### Deletion Confirmation
-
-When you press `d`:
-1. If nothing is selected, the chat under the cursor is auto-selected for this single action (in grouped view, pressing `d` on a project header auto-selects every chat in that project)
-2. Confirmation dialog appears
-3. Press `ENTER` to confirm deletion
-4. Press `ESC` or `n` to cancel — if the selection was made automatically, it is reverted so the next `d` acts on the new cursor position
-
-All related files are deleted:
-- Main chat file (`.jsonl`)
-- Subagents directory (`<uuid>/subagents/`)
-- Tool results directory (`<uuid>/tool-results/`)
-- Agent memory (`agents/<agent-id>/memory-local.md`)
-- File history (`file-history/<uuid>/`)
-- Debug logs (`debug/*.txt`)
-- Security warning state (`security_warnings_state_<uuid>.json`)
-- Todo files (`todos/*.json`)
-- Session environment (`session-env/*/`)
-- Task state (`tasks/<uuid>/`)
-- Plan files (`plans/*.md`)
-- Entry in `sessions-index.json` (updated automatically)
-
-Note: in newer Claude Code versions, debug logs are not written by default unless `/debug` is enabled.
+See [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) for the full keybinding reference and tips for large chat histories, and [docs/deletion-behavior.md](docs/deletion-behavior.md) for what gets deleted per chat.
 
 ## Updates
 
-The tool automatically checks for updates on startup (once per hour). When a new version is available, you'll be prompted to install it.
+The tool checks for updates on startup (once per hour) and prompts you to install when a new version is available. Toggle auto-updates from the **Settings** tab (press `→`), or run `claude-chats --update` for a manual check / `--version` to see the current version.
 
-### Manual Update Check
-
-```bash
-claude-chats --update  # Check for updates manually
-claude-chats --version # Show current version
-```
-
-### Disable Auto-Updates
-
-Set environment variable:
-```bash
-export CLAUDE_CHATS_DISABLE_AUTOUPDATER=1
-```
-
-Or edit `~/.config/claude-chats/config.json`:
-```json
-{
-  "auto_updates": false
-}
-```
+To disable auto-updates without opening the TUI, set `CLAUDE_CHATS_DISABLE_AUTOUPDATER=1` in your environment.
 
 ## Configuration
 
 On first run, you'll be prompted to specify your Claude directory. Configuration is saved to `~/.config/claude-chats/config.json`.
 
-## Claude Directory Structure
+## Star History
 
-The tool manages files in `~/.claude/`:
-
-```
-~/.claude/
-├── projects/<project>/
-│   ├── <uuid>.jsonl              # Main chat file
-│   ├── <uuid>/                   # Chat directory
-│   │   ├── subagents/            # Subagent conversations
-│   │   └── tool-results/         # Tool execution results
-│   └── sessions-index.json       # Index of chat sessions
-├── file-history/<uuid>/          # File version history
-├── debug/<uuid>.txt              # Debug logs
-├── todos/<uuid>-*.json           # Todo lists
-├── session-env/<uuid>/           # Session environments
-├── tasks/<uuid>/                 # Background task state
-├── plans/*.md                    # Plan mode files
-└── agents/<agent-id>/            # Agent memory (v2.1.33+)
-    ├── memory-local.md           # Session-specific memory (deleted)
-    ├── memory-project.md         # Project memory (preserved)
-    └── memory-user.md            # Global memory (preserved)
-```
-
-**Note:** Only `memory-local.md` files are deleted when removing chats. Project and user scope memories are preserved as they may be shared across multiple sessions.
+<a href="https://www.star-history.com/?repos=ataleckij%2Fclaude-chats-delete&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ataleckij/claude-chats-delete&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ataleckij/claude-chats-delete&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ataleckij/claude-chats-delete&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ## License
 
