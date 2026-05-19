@@ -29,6 +29,11 @@ type Chat struct {
 	LineCount int
 	Path      string
 	Files     []string // related files for deletion
+
+	// ForkParentID is the parent sessionId for /fork branches (v2.1.118+), empty
+	// otherwise. Currently unused — fork JSONLs are self-contained, so deleting
+	// a parent doesn't break them; kept for future "(Branch of …)" UI labels.
+	ForkParentID string
 }
 
 // JSONLMessage represents a message in the JSONL file
@@ -42,6 +47,9 @@ type JSONLMessage struct {
 	Message     struct {
 		Content string `json:"content"`
 	} `json:"message"`
+	ForkedFrom struct {
+		SessionID string `json:"sessionId"`
+	} `json:"forkedFrom"`
 }
 
 // SessionsIndex represents the sessions-index.json structure

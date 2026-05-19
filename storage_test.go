@@ -237,15 +237,15 @@ func TestGetChatTitle(t *testing.T) {
 }
 
 func TestScanChatMetadata(t *testing.T) {
-	// Locks in the 3-in-1 contract: title, version, lineCount all returned
-	// from a single call in one file pass.
+	// Locks in the 4-in-1 contract: title, version, forkParentID, lineCount all
+	// returned from a single call in one file pass.
 	lines := []string{
 		`{"type":"file-history-snapshot"}`,
 		`{"type":"user","message":{"content":"hello"},"isMeta":false,"version":"2.1.76"}`,
 		`{"type":"custom-title","customTitle":"renamed","sessionId":"x"}`,
 	}
 	path := writeTempJSONL(t, lines)
-	title, version, lineCount := scanChatMetadata(path)
+	title, version, forkParentID, lineCount := scanChatMetadata(path)
 
 	if title != "renamed" {
 		t.Errorf("title = %q, want %q", title, "renamed")
@@ -253,8 +253,29 @@ func TestScanChatMetadata(t *testing.T) {
 	if version != "2.1.76" {
 		t.Errorf("version = %q, want %q", version, "2.1.76")
 	}
+	if forkParentID != "" {
+		t.Errorf("forkParentID = %q, want empty (no forkedFrom in input)", forkParentID)
+	}
 	if lineCount != 3 {
 		t.Errorf("lineCount = %d, want 3", lineCount)
+	}
+}
+
+func TestScanChatMetadata_ForkParentID(t *testing.T) {
+	// Locks in extraction of forkedFrom.sessionId. Without this the JSON tag
+	// could silently drift (e.g. renamed to session_id) and detection would
+	// stop working with no test failure.
+	parent := "63a4ac4a-8068-4516-b8c8-3c86b1e86d6f"
+	lines := []string{
+		`{"type":"user","forkedFrom":{"sessionId":"` + parent + `","messageUuid":"abc"},"message":{"content":"hi"}}`,
+		`{"type":"assistant","forkedFrom":{"sessionId":"` + parent + `","messageUuid":"def"},"message":{"content":"hello"}}`,
+		`{"type":"user","message":{"content":"new message in fork"}}`,
+	}
+	path := writeTempJSONL(t, lines)
+	_, _, forkParentID, _ := scanChatMetadata(path)
+
+	if forkParentID != parent {
+		t.Errorf("forkParentID = %q, want %q", forkParentID, parent)
 	}
 }
 

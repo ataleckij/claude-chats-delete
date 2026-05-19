@@ -52,7 +52,7 @@ func findAllChats() []Chat {
 				continue
 			}
 
-			title, version, lineCount := scanChatMetadata(file)
+			title, version, forkParentID, lineCount := scanChatMetadata(file)
 			timestamp := getChatTimestamp(file)
 
 			// TODO: Get messageCount from index if available
@@ -65,8 +65,9 @@ func findAllChats() []Chat {
 				Project:   entry.Name(),
 				Version:   version,
 				// MessageCount: msgCount,
-				LineCount: lineCount,
-				Path:      file,
+				LineCount:    lineCount,
+				Path:         file,
+				ForkParentID: forkParentID,
 			})
 		}
 	}
@@ -137,10 +138,10 @@ func cleanSystemTags(content string) string {
 // Scans the full file without an early exit: late /rename records can appear
 // at any line and lineCount needs the whole file, so any bail-out cap would
 // silently break rename detection on long sessions.
-func scanChatMetadata(jsonlFile string) (title, version string, lineCount int) {
+func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, lineCount int) {
 	file, err := os.Open(jsonlFile)
 	if err != nil {
-		return "[Error opening file]", "", 0
+		return "[Error opening file]", "", "", 0
 	}
 	defer file.Close()
 
@@ -160,6 +161,10 @@ func scanChatMetadata(jsonlFile string) (title, version string, lineCount int) {
 
 		if version == "" && msg.Version != "" {
 			version = msg.Version
+		}
+
+		if forkParentID == "" && msg.ForkedFrom.SessionID != "" {
+			forkParentID = msg.ForkedFrom.SessionID
 		}
 
 		// /rename writes a dedicated record; last one wins.
@@ -195,13 +200,13 @@ func scanChatMetadata(jsonlFile string) (title, version string, lineCount int) {
 
 // getChatTitle returns just the title. Retained for test compatibility.
 func getChatTitle(jsonlFile string) string {
-	title, _, _ := scanChatMetadata(jsonlFile)
+	title, _, _, _ := scanChatMetadata(jsonlFile)
 	return title
 }
 
 // getChatVersion returns just the version. Retained for test compatibility.
 func getChatVersion(jsonlFile string) string {
-	_, version, _ := scanChatMetadata(jsonlFile)
+	_, version, _, _ := scanChatMetadata(jsonlFile)
 	return version
 }
 
