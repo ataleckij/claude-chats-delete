@@ -86,6 +86,17 @@ var (
 	agentsDir      string
 )
 
+// TODO: directories under ~/.claude that are not yet covered. For each, decide
+// whether per-chat cleanup applies (UUID-keyed -> include in findRelatedFiles)
+// or whether it belongs to a global retention pool (timestamp-keyed -> ignore).
+//   - worktrees/  (v2.1.157+) background-agent git worktrees
+//   - workflows/  (v2.1.154+) dynamic-workflow run state
+// Inspect on-disk layout before adding; do not guess UUID-keyed-ness from the name.
+
+// TODO: fork sessions carry references to their parent chat (v2.1.118+,
+// surfaced as Chat.ForkParentID). Decide how to handle this relationship to
+// avoid broken or surprising UX around the parent/fork pair.
+
 // Config management
 
 func loadConfig() (*Config, error) {
