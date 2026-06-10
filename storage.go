@@ -395,6 +395,13 @@ func findRelatedFiles(uuid string) []string {
 
 	// Agent memory files (v2.1.33+)
 	// Parse agent IDs from chat JSONL and delete local scope memory
+	//
+	// TODO: sub-agents can now spawn their own sub-agents up to 5 levels deep
+	// (v2.1.172+). parseAgentIDs only scans the main chat JSONL, so a nested
+	// agent whose agentId appears only in a sub-agent transcript (under the
+	// subagents/ dir) could leave an orphaned agents/<id>/memory-local.md.
+	// Verify on disk whether nested agentIds surface in the main JSONL; if not,
+	// scan the subagents/ transcripts recursively too.
 	if chatJSONLPath != "" {
 		agentIDs := parseAgentIDs(chatJSONLPath)
 		for _, agentID := range agentIDs {
