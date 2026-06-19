@@ -132,12 +132,13 @@ func cleanSystemTags(content string) string {
 
 // scanChatMetadata reads a chat JSONL file in a single pass and extracts
 // display metadata (title, version, line count). Title priority matches the
-// Claude Code --resume picker: customTitle (/rename) > first user message >
-// summary fallback. Replaces three separate file scans.
+// Claude Code --resume picker: customTitle (/rename) > aiTitle (auto-generated,
+// v2.1.x) > first user message > summary fallback. Replaces three separate file
+// scans.
 //
-// Scans the full file without an early exit: late /rename records can appear
-// at any line and lineCount needs the whole file, so any bail-out cap would
-// silently break rename detection on long sessions.
+// Scans the full file without an early exit: late /rename and ai-title records
+// can appear at any line and lineCount needs the whole file, so any bail-out cap
+// would silently break title detection on long sessions.
 func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, lineCount int) {
 	file, err := os.Open(jsonlFile)
 	if err != nil {
@@ -149,7 +150,10 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
 	scanner.Buffer(buf, len(buf))
 
-	var firstUserMsg, firstSummary, lastCustomTitle string
+	// Titles use last-wins (rewritten over the session, keep the latest);
+	// firstUserMsg/firstSummary use first-wins (guarded by == "", keep the
+	// earliest). Don't mix the two strategies up when editing the loop below.
+	var firstUserMsg, firstSummary, lastCustomTitle, lastAiTitle string
 
 	for scanner.Scan() {
 		lineCount++
@@ -173,6 +177,12 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 			continue
 		}
 
+		// Auto-generated title; rewritten as the conversation evolves, last wins.
+		if msg.Type == "ai-title" && msg.AiTitle != "" {
+			lastAiTitle = msg.AiTitle
+			continue
+		}
+
 		if firstSummary == "" && msg.Type == "summary" && msg.Summary != "" {
 			firstSummary = msg.Summary
 			continue
@@ -188,6 +198,8 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 	switch {
 	case lastCustomTitle != "":
 		title = lastCustomTitle
+	case lastAiTitle != "":
+		title = lastAiTitle
 	case firstUserMsg != "":
 		title = firstUserMsg
 	case firstSummary != "":

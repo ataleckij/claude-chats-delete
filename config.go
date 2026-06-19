@@ -44,6 +44,7 @@ type JSONLMessage struct {
 	IsMeta      bool   `json:"isMeta"`
 	Summary     string `json:"summary"`
 	CustomTitle string `json:"customTitle"`
+	AiTitle     string `json:"aiTitle"`
 	Message     struct {
 		Content string `json:"content"`
 	} `json:"message"`

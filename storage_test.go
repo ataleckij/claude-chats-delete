@@ -219,6 +219,43 @@ func TestGetChatTitle(t *testing.T) {
 			},
 			want: "real question",
 		},
+		{
+			name: "ai-title overrides first user message",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"проанализируй рабочее пространство"},"isMeta":false}`,
+				`{"type":"ai-title","aiTitle":"Analyze workspace structure","sessionId":"abc"}`,
+			},
+			want: "Analyze workspace structure",
+		},
+		{
+			name: "custom-title from /rename overrides ai-title",
+			lines: []string{
+				line1,
+				`{"type":"ai-title","aiTitle":"auto generated","sessionId":"abc"}`,
+				`{"type":"custom-title","customTitle":"manual name","sessionId":"abc"}`,
+			},
+			want: "manual name",
+		},
+		{
+			name: "multiple ai-title records: last one wins",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"hi"},"isMeta":false}`,
+				`{"type":"ai-title","aiTitle":"early title","sessionId":"abc"}`,
+				`{"type":"ai-title","aiTitle":"refined title","sessionId":"abc"}`,
+			},
+			want: "refined title",
+		},
+		{
+			name: "empty ai-title is ignored, falls back to user message",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"real question"},"isMeta":false}`,
+				`{"type":"ai-title","aiTitle":"","sessionId":"abc"}`,
+			},
+			want: "real question",
+		},
 	}
 
 	for _, tt := range tests {
