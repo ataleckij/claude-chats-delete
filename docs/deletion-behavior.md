@@ -38,7 +38,11 @@ For each chat UUID, the tool removes:
   project- and user-scope memories are preserved as they may be shared)
 
 The tool also updates `projects/<project>/sessions-index.json` to drop the
-entry for the deleted chat.
+entry for the deleted chat. Recent Claude Code versions may not write this
+index at all; when it is absent the update is a no-op.
+
+Project-scoped state is preserved: `projects/<project>/memory/` (project memory
+notes) is not tied to a single chat and is left untouched on delete.
 
 Debug logs are not written by default in recent Claude Code versions unless
 `/debug` is enabled.
@@ -54,7 +58,8 @@ The files above live in `~/.claude/`:
 │   ├── <uuid>/                   # chat directory
 │   │   ├── subagents/            # subagent conversations
 │   │   └── tool-results/         # tool execution results
-│   └── sessions-index.json       # chat index (tool updates on delete)
+│   ├── memory/                   # project memory (preserved)
+│   └── sessions-index.json       # chat index (updated on delete, may be absent)
 ├── file-history/<uuid>/          # file version history
 ├── debug/<uuid>.txt              # debug logs
 ├── todos/<uuid>-*.json           # todo lists
