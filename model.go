@@ -179,9 +179,13 @@ func (m model) chatIndicesForProject(project string) []int {
 }
 
 func (m model) renderTabBar() string {
-	appName := dimStyle.Render("Claude Code Manager")
+	appName := dimStyle.Render("Claude Chats Delete")
 	var tabParts []string
 	for i, name := range tabs {
+		// The chats tab is labeled "Projects" in grouped view.
+		if i == tabChats && m.grouped {
+			name = "Projects"
+		}
 		if i == m.tab {
 			tabParts = append(tabParts, activeTabStyle.Render(name))
 		} else {
@@ -935,21 +939,22 @@ func (m model) viewGrouped() string {
 
 	compact := width < compactModeWidth
 
-	// Column widths for chat rows (indented by 2 for nesting)
-	var timestampWidth, versionWidth, fixedWidth int
+	// Column widths for chat rows (indented by 2 for nesting). Project view always
+	// shows the full timestamp — dropping the PROJECT column frees the space — so
+	// only VERSION is hidden on narrow terminals, not the date.
+	timestampWidth := 19
+	var versionWidth, fixedWidth int
 	if compact {
-		timestampWidth = 11
 		versionWidth = 0
 		fixedWidth = 4 + 2 + timestampWidth + 5 + 5 // indicator + indent + ts + lines + gaps
 	} else {
-		timestampWidth = 19
 		versionWidth = 8
-		fixedWidth = 46 // indicator(4) + indent(2) + ts(19) + version(8) + lines(5) + gaps(8)
+		fixedWidth = 4 + 2 + timestampWidth + versionWidth + 5 + 8 // + version + extra gap
 	}
 
 	linesWidth := 5
 	remaining := width - fixedWidth
-	titleWidth := remaining * 65 / 100 // more title space since project is in header
+	titleWidth := remaining * 65 / 100 // project column omitted here, so give title a larger share than the flat list's 60%
 	if titleWidth < 30 {
 		titleWidth = 30
 	}
@@ -962,8 +967,17 @@ func (m model) viewGrouped() string {
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
 
-	// Thin column header for grouped view
-	header := fmt.Sprintf("    %-*s", width-4, "PROJECT / CHAT")
+	// Column headers, same columns as the flat list minus PROJECT (it is the
+	// group header). Leading 5 spaces align with the indented chat rows below:
+	// indicator (3) + the 2-space nesting indent.
+	var header string
+	if compact {
+		headerFmt := fmt.Sprintf("     %%-*s  %%-%ds  %%-%ds", linesWidth, titleWidth)
+		header = fmt.Sprintf(headerFmt, timestampWidth, "TIMESTAMP", "LINES", "TITLE")
+	} else {
+		headerFmt := fmt.Sprintf("     %%-*s  %%-%ds  %%-%ds  %%-%ds", versionWidth, linesWidth, titleWidth)
+		header = fmt.Sprintf(headerFmt, timestampWidth, "TIMESTAMP", "VERSION", "LINES", "TITLE")
+	}
 	s.WriteString(dimStyle.Render(header))
 	s.WriteString("\n")
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
@@ -1000,13 +1014,14 @@ func (m model) viewGrouped() string {
 
 			projectClean := strings.NewReplacer("\n", " ").Replace(row.project)
 			countInfo := dimStyle.Render(fmt.Sprintf("(%d chats, %d selected)", total, sel))
-			line := fmt.Sprintf("%s %s %s  %s", indicator, arrow, projectClean, countInfo)
+			left := fmt.Sprintf("%s %s %s", indicator, arrow, projectClean)
 
-			// Pad to full width
-			lineWidth := lipgloss.Width(line)
-			if lineWidth < width {
-				line += strings.Repeat(" ", width-lineWidth)
+			// Anchor the count info to the right edge (same gap trick as the tab bar).
+			gap := width - lipgloss.Width(left) - lipgloss.Width(countInfo)
+			if gap < 1 {
+				gap = 1
 			}
+			line := left + strings.Repeat(" ", gap) + countInfo
 
 			style := lipgloss.NewStyle()
 			if sel > 0 && sel == total {
@@ -1021,16 +1036,8 @@ func (m model) viewGrouped() string {
 			// Chat row (indented under project)
 			chat := m.chats[row.chatIdx]
 
-			var timestamp string
-			if compact {
-				if len(chat.Timestamp) >= 16 {
-					timestamp = chat.Timestamp[5:16]
-				} else {
-					timestamp = runewidth.Truncate(chat.Timestamp, timestampWidth, "")
-				}
-			} else {
-				timestamp = runewidth.Truncate(chat.Timestamp, timestampWidth, "")
-			}
+			// Full timestamp in both layouts (project view has the room for it).
+			timestamp := runewidth.Truncate(chat.Timestamp, timestampWidth, "")
 
 			var version string
 			if versionWidth > 0 {
