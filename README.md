@@ -1,5 +1,7 @@
 # Claude Code Chats Delete TUI
 
+## 1. Overview
+
 **Delete and remove Claude Code chat sessions** with an interactive terminal UI.
 
 [YouTube Presentation](https://youtu.be/FFmKh5kCyuE)
@@ -8,9 +10,15 @@ Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
 Tested with Claude Code **v2.1.181**.
 
-<img src="./demo.gif" />
+**Project view**
 
-## Features
+<img src="./assets/project-view.png" />
+
+**Chats view**
+
+<img src="./assets/chats-view.png" />
+
+## 2. Features
 
 - Browse chat sessions across all projects, with optional grouped-by-project view
 - Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, todos, tasks, plans, agent memory, and more)
@@ -18,7 +26,11 @@ Tested with Claude Code **v2.1.181**.
 - Keyboard-driven interface with vim keys and fast page navigation
 - Auto-update via GitHub releases
 
-## Installation
+## 3. What Gets Deleted
+
+Before deleting, see [what gets removed per chat](docs/deletion-behavior.md) -- the full list of files cleaned up for each session.
+
+## 4. Installation
 
 ### Quick Install
 
@@ -38,7 +50,7 @@ This will:
 
 See [docs/install-from-source.md](docs/install-from-source.md) for manual build instructions (requires Go 1.21+).
 
-## Usage
+## 5. Usage
 
 ```bash
 claude-chats
@@ -46,29 +58,19 @@ claude-chats
 
 ### Keyboard Controls
 
-| Key | Action |
-|-----|--------|
-| `SPACE` | Select/deselect current chat |
-| `a` | Select/deselect all chats |
-| `c` | Copy chat UUID to clipboard |
-| `d` | Delete selected chats, or the chat under cursor if none are selected (with confirmation) |
-| `r` | Refresh chat list |
-| `q` or `Ctrl+C` | Quit |
-| `↑/↓`, `k/j`, `f/b`, `F/B`, `g/G` | Navigate (arrows, vim keys, page, half-page, home/end) |
+See [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) for the full keybinding reference and tips for large chat histories.
 
-See [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) for the full keybinding reference and tips for large chat histories, and [docs/deletion-behavior.md](docs/deletion-behavior.md) for what gets deleted per chat.
-
-## Updates
+## 6. Updates
 
 The tool checks for updates on startup (once per hour) and prompts you to install when a new version is available. Toggle auto-updates from the **Settings** tab (press `→`), or run `claude-chats --update` for a manual check / `--version` to see the current version.
 
 To disable auto-updates without opening the TUI, set `CLAUDE_CHATS_DISABLE_AUTOUPDATER=1` in your environment.
 
-## Configuration
+## 7. Configuration
 
 On first run, you'll be prompted to specify your Claude directory. Configuration is saved to `~/.config/claude-chats/config.json`.
 
-## Star History
+## 8. Star History
 
 <a href="https://www.star-history.com/?repos=ataleckij%2Fclaude-chats-delete&type=date&legend=top-left">
  <picture>
@@ -78,6 +80,6 @@ On first run, you'll be prompted to specify your Claude directory. Configuration
  </picture>
 </a>
 
-## License
+## 9. License
 
 [MIT](LICENSE)
