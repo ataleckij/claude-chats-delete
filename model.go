@@ -34,9 +34,13 @@ var (
 				Foreground(adaptiveColor("241", "8")).
 				Padding(0, 1)
 
+	// Selection is a filled bar (yellow background, black text) rather than
+	// yellow foreground text, which was nearly invisible on light terminal
+	// themes. A bar carries its own contrast regardless of background.
 	selectedStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(adaptiveColor("226", "11"))
+			Background(adaptiveColor("226", "11")).
+			Foreground(adaptiveColor("0", "0"))
 
 	cursorStyle = lipgloss.NewStyle().
 			Reverse(true)
