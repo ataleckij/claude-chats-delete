@@ -133,8 +133,8 @@ func cleanSystemTags(content string) string {
 // scanChatMetadata reads a chat JSONL file in a single pass and extracts
 // display metadata (title, version, line count). Title priority matches the
 // Claude Code --resume picker: customTitle (/rename) > aiTitle (auto-generated,
-// v2.1.x) > first user message > summary fallback. Replaces three separate file
-// scans.
+// v2.1.x) > agentName (readable session name) > first user message > summary
+// fallback. Replaces three separate file scans.
 //
 // Scans the full file without an early exit: late /rename and ai-title records
 // can appear at any line and lineCount needs the whole file, so any bail-out cap
@@ -153,7 +153,7 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 	// Titles use last-wins (rewritten over the session, keep the latest);
 	// firstUserMsg/firstSummary use first-wins (guarded by == "", keep the
 	// earliest). Don't mix the two strategies up when editing the loop below.
-	var firstUserMsg, firstSummary, lastCustomTitle, lastAiTitle string
+	var firstUserMsg, firstSummary, lastCustomTitle, lastAiTitle, lastAgentName string
 
 	for scanner.Scan() {
 		lineCount++
@@ -183,6 +183,12 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 			continue
 		}
 
+		// Readable session name (e.g. named background sessions); last wins.
+		if msg.Type == "agent-name" && msg.AgentName != "" {
+			lastAgentName = msg.AgentName
+			continue
+		}
+
 		if firstSummary == "" && msg.Type == "summary" && msg.Summary != "" {
 			firstSummary = msg.Summary
 			continue
@@ -200,6 +206,8 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 		title = lastCustomTitle
 	case lastAiTitle != "":
 		title = lastAiTitle
+	case lastAgentName != "":
+		title = lastAgentName
 	case firstUserMsg != "":
 		title = firstUserMsg
 	case firstSummary != "":

@@ -45,6 +45,7 @@ type JSONLMessage struct {
 	Summary     string `json:"summary"`
 	CustomTitle string `json:"customTitle"`
 	AiTitle     string `json:"aiTitle"`
+	AgentName   string `json:"agentName"`
 	Message     struct {
 		Content string `json:"content"`
 	} `json:"message"`

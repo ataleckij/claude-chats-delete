@@ -256,6 +256,33 @@ func TestGetChatTitle(t *testing.T) {
 			},
 			want: "real question",
 		},
+		{
+			name: "agent-name is used when no custom-title or ai-title",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"first prompt text"},"isMeta":false}`,
+				`{"type":"agent-name","agentName":"PoC","sessionId":"abc"}`,
+			},
+			want: "PoC",
+		},
+		{
+			name: "ai-title overrides agent-name",
+			lines: []string{
+				line1,
+				`{"type":"agent-name","agentName":"PoC","sessionId":"abc"}`,
+				`{"type":"ai-title","aiTitle":"auto generated","sessionId":"abc"}`,
+			},
+			want: "auto generated",
+		},
+		{
+			name: "empty agent-name is ignored, falls back to user message",
+			lines: []string{
+				line1,
+				`{"type":"user","message":{"content":"real question"},"isMeta":false}`,
+				`{"type":"agent-name","agentName":"","sessionId":"abc"}`,
+			},
+			want: "real question",
+		},
 	}
 
 	for _, tt := range tests {
