@@ -8,15 +8,15 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code **v2.1.198**.
-
-**Project view**
-
-<img src="./assets/project-view.png" />
+Tested with Claude Code **v2.1.206**.
 
 **Chats view**
 
 <img src="./assets/chats-view.png" />
+
+**Project view**
+
+<img src="./assets/project-view.png" />
 
 ## 2. Features
 
@@ -28,7 +28,27 @@ Tested with Claude Code **v2.1.198**.
 
 ## 3. What Gets Deleted
 
-Before deleting, see [what gets removed per chat](docs/deletion-behavior.md) -- the full list of files cleaned up for each session.
+Deleting a chat removes its full on-disk footprint, not just the transcript:
+
+```
+~/.claude/
+├── projects/<project>/
+│   ├── <uuid>.jsonl                     # main transcript
+│   ├── <uuid>/                          # subagents/ + tool-results/
+│   └── sessions-index.json              # entry removed (if the index exists)
+├── todos/<uuid>-*.json                  # todo lists
+├── tasks/<uuid>/                        # task state
+├── file-history/<uuid>/                 # pre-edit file snapshots
+├── session-env/<uuid>/                  # session environment
+├── debug/<uuid>.txt                     # debug log
+├── security_warnings_state_<uuid>.json  # security-hook dedupe state
+├── plans/<slug>.md                      # plan file (only if no other chat uses it)
+└── agents/<agent-id>/memory-local.md    # session-scoped agent memory
+```
+
+Project- and user-scoped state (`projects/<project>/memory/`, `memory-project.md`,
+`memory-user.md`) is preserved. See [docs/deletion-behavior.md](docs/deletion-behavior.md)
+for the full breakdown and the confirmation flow.
 
 ## 4. Installation
 
