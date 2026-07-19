@@ -30,9 +30,14 @@ type Chat struct {
 	Path      string
 	Files     []string // related files for deletion
 
-	// ForkParentID is the parent sessionId for /fork branches (v2.1.118+), empty
-	// otherwise. Currently unused — fork JSONLs are self-contained, so deleting
-	// a parent doesn't break them; kept for future "(Branch of …)" UI labels.
+	// ForkParentID identifies the parent session referenced by a fork, or is empty
+	// for a regular session. Populated from transcript-level forkedFrom
+	// back-references (written v2.1.118 through ~v2.1.206). Verified on v2.1.215:
+	// fork transcripts are full self-contained copies (deleting the parent keeps
+	// the fork's history intact), forkedFrom is no longer written, and the parent
+	// linkage lives in ~/.claude/jobs/<id>/state.json (forkParentSessionId) —
+	// so this field stays empty for new forks. Kept for older transcripts and
+	// future "(Branch of …)" labels.
 	ForkParentID string
 }
 
@@ -93,11 +98,19 @@ var (
 // or whether it belongs to a global retention pool (timestamp-keyed -> ignore).
 //   - worktrees/  (v2.1.157+) background-agent git worktrees
 //   - workflows/  (v2.1.154+) dynamic-workflow run state
+//   - jobs/       (v2.1.212+) background-session job state, keyed by the first
+//                 8 hex chars of the session UUID (state.json, timeline.jsonl).
+//                 A fork's tmp/parent-transcript.jsonl holds a COPY of the
+//                 parent session's transcript, so deleting the parent leaves
+//                 its content behind here. pins.json in the same dir is global.
 // Inspect on-disk layout before adding; do not guess UUID-keyed-ness from the name.
 
-// TODO: fork sessions carry references to their parent chat (v2.1.118+,
-// surfaced as Chat.ForkParentID). Decide how to handle this relationship to
-// avoid broken or surprising UX around the parent/fork pair.
+// TODO: fork/parent handling (verified on v2.1.215): fork JSONLs are full
+// self-contained copies, so deleting a parent does not break a fork's history.
+// Remaining work: fork detection for v2.1.212+ must read
+// ~/.claude/jobs/<id>/state.json (forkParentSessionId) since transcripts no
+// longer carry forkedFrom; and deleting a parent still leaves a copy of its
+// transcript in the fork's jobs tmp dir (see the jobs/ entry above).
 
 // Config management
 
