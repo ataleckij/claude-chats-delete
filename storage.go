@@ -4,11 +4,32 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
+
+// jsonlScanTokenMax caps a single JSONL record. Records carry tool results and
+// inlined attachments, so they routinely exceed bufio's 64 KiB default; a record
+// above this cap stops the scan, which callers detect via scanner.Err().
+// Overridable in tests.
+var jsonlScanTokenMax = 16 * 1024 * 1024
+
+// newJSONLScanner returns a scanner sized for transcript records. It starts
+// small and grows on demand, so large caps cost nothing on ordinary files. The
+// starting buffer never exceeds the cap: bufio uses the larger of the two, which
+// would otherwise silently raise the effective limit.
+func newJSONLScanner(r io.Reader) *bufio.Scanner {
+	start := 64 * 1024
+	if jsonlScanTokenMax < start {
+		start = jsonlScanTokenMax
+	}
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, start), jsonlScanTokenMax)
+	return scanner
+}
 
 func findAllChats() []Chat {
 	var chats []Chat
@@ -146,9 +167,7 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
-	scanner.Buffer(buf, len(buf))
+	scanner := newJSONLScanner(file)
 
 	// Titles use last-wins (rewritten over the session, keep the latest);
 	// firstUserMsg/firstSummary use first-wins (guarded by == "", keep the
@@ -215,6 +234,13 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 	default:
 		title = "[No title]"
 	}
+
+	// A scan that stopped early (a record above the size limit, or an I/O error)
+	// leaves the title and line count based on a partial read. Mark it so the
+	// list does not present incomplete metadata as complete.
+	if scanner.Err() != nil {
+		title += " [partial scan]"
+	}
 	return
 }
 
@@ -238,16 +264,17 @@ func getChatTimestamp(jsonlFile string) string {
 	return info.ModTime().Format("2006-01-02 15:04:05")
 }
 
-func getSlugFromChat(jsonlFile string) string {
+// getSlugFromChat returns the plan slug referenced by a transcript. ok is false
+// when the file could not be read to the end, so callers can tell "no slug" from
+// "unknown" and avoid deleting a plan on incomplete evidence.
+func getSlugFromChat(jsonlFile string) (slug string, ok bool) {
 	file, err := os.Open(jsonlFile)
 	if err != nil {
-		return ""
+		return "", false
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
-	scanner.Buffer(buf, len(buf))
+	scanner := newJSONLScanner(file)
 
 	// Scan all lines to find slug (it can be in any message)
 	for scanner.Scan() {
@@ -256,11 +283,11 @@ func getSlugFromChat(jsonlFile string) string {
 			continue
 		}
 		if msg.Slug != "" {
-			return msg.Slug
+			return msg.Slug, true
 		}
 	}
 
-	return ""
+	return "", scanner.Err() == nil
 }
 
 // isSlugUsedInOtherChats checks whether slug is still referenced by chats other
@@ -280,7 +307,11 @@ func isSlugUsedInOtherChats(slug string, excludeUUID string) bool {
 		if uuid == excludeUUID {
 			continue
 		}
-		if getSlugFromChat(path) == slug {
+		other, ok := getSlugFromChat(path)
+		if !ok {
+			return true // safe default: a transcript we could not read may use it
+		}
+		if other == slug {
 			return true
 		}
 	}
@@ -503,8 +534,8 @@ func legacyRelatedFiles(uuid, chatJSONLPath string) []string {
 
 	// Plan file (via slug), deleted only when no other chat references the slug
 	if chatJSONLPath != "" {
-		slug := getSlugFromChat(chatJSONLPath)
-		if slug != "" && !isSlugUsedInOtherChats(slug, uuid) {
+		slug, ok := getSlugFromChat(chatJSONLPath)
+		if ok && slug != "" && !isSlugUsedInOtherChats(slug, uuid) {
 			planFile := filepath.Join(plansDir, slug+".md")
 			if _, err := os.Stat(planFile); err == nil {
 				files = append(files, planFile)
@@ -516,7 +547,12 @@ func legacyRelatedFiles(uuid, chatJSONLPath string) []string {
 	// agent-memory/<agent-name>/ and is project-scoped, so it is preserved on
 	// delete; only the old per-agent memory-local.md was session-scoped.
 	if chatJSONLPath != "" {
-		for _, agentID := range parseAgentIDs(chatJSONLPath) {
+		// An incomplete scan is safe to ignore here: every id it did find is
+		// genuinely this chat's, and ids it missed only mean their memory is
+		// left behind. Unlike the plan file, a partial result cannot point at
+		// another chat's data.
+		agentIDs, _ := parseAgentIDs(chatJSONLPath)
+		for _, agentID := range agentIDs {
 			localMemory := filepath.Join(agentsDir, agentID, "memory-local.md")
 			if _, err := os.Stat(localMemory); err == nil {
 				files = append(files, localMemory)
@@ -530,20 +566,19 @@ func legacyRelatedFiles(uuid, chatJSONLPath string) []string {
 	return files
 }
 
-// parseAgentIDs extracts agent IDs from chat JSONL file
-func parseAgentIDs(chatFile string) []string {
+// parseAgentIDs extracts agent IDs from a chat JSONL file. ok is false when the
+// file could not be read to the end, in which case the list may be incomplete.
+func parseAgentIDs(chatFile string) (ids []string, ok bool) {
 	var agentIDs []string
 	seen := make(map[string]bool)
 
 	file, err := os.Open(chatFile)
 	if err != nil {
-		return agentIDs
+		return agentIDs, false
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, 1024*1024) // 1MB buffer for large JSONL lines
-	scanner.Buffer(buf, len(buf))
+	scanner := newJSONLScanner(file)
 	for scanner.Scan() {
 		var msg struct {
 			AgentID string `json:"agentId"`
@@ -556,7 +591,7 @@ func parseAgentIDs(chatFile string) []string {
 		}
 	}
 
-	return agentIDs
+	return agentIDs, scanner.Err() == nil
 }
 
 // deleteChats deletes all files related to the given chats and updates sessions index.

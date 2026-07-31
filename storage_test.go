@@ -649,6 +649,127 @@ func TestFindRelatedFiles_JobState(t *testing.T) {
 	}
 }
 
+// Records larger than bufio's 64 KiB default must still be scanned.
+func TestScanChatMetadata_LargeRecord(t *testing.T) {
+	big := strings.Repeat("x", 2*1024*1024) // 2 MiB, over the previous 1 MiB cap
+	path := writeTempJSONL(t, []string{
+		`{"type":"user","message":{"content":"` + big + `"},"isMeta":false}`,
+		`{"type":"ai-title","aiTitle":"after the big record","sessionId":"abc"}`,
+	})
+
+	title, _, _, lineCount := scanChatMetadata(path)
+	if title != "after the big record" {
+		t.Errorf("title = %q, want the record after the large one", title)
+	}
+	if lineCount != 2 {
+		t.Errorf("lineCount = %d, want 2", lineCount)
+	}
+}
+
+// A record above the cap stops the scan. Metadata is then based on a partial
+// read and must say so, and slug/agent lookups must report that they are unsure
+// so deletion does not act on incomplete evidence.
+func TestScanIncompleteIsReported(t *testing.T) {
+	orig := jsonlScanTokenMax
+	jsonlScanTokenMax = 512
+	defer func() { jsonlScanTokenMax = orig }()
+
+	oversized := strings.Repeat("x", 2048)
+	path := writeTempJSONL(t, []string{
+		`{"type":"user","message":{"content":"small"},"isMeta":false,"slug":"my-slug"}`,
+		`{"type":"user","message":{"content":"` + oversized + `"},"isMeta":false}`,
+		`{"type":"ai-title","aiTitle":"never reached","sessionId":"abc"}`,
+	})
+
+	title, _, _, _ := scanChatMetadata(path)
+	if !strings.Contains(title, "[partial scan]") {
+		t.Errorf("title = %q, want it marked as a partial scan", title)
+	}
+
+	// The slug appears before the oversized record, so it is still found.
+	if slug, ok := getSlugFromChat(path); slug != "my-slug" || !ok {
+		t.Errorf("getSlugFromChat = (%q, %v), want (\"my-slug\", true)", slug, ok)
+	}
+
+	// Nothing usable before the oversized record: the result is unknown, not empty.
+	path2 := writeTempJSONL(t, []string{
+		`{"type":"user","message":{"content":"` + oversized + `"},"isMeta":false}`,
+		`{"type":"user","slug":"late-slug"}`,
+	})
+	if slug, ok := getSlugFromChat(path2); ok {
+		t.Errorf("getSlugFromChat = (%q, %v), want ok=false on a truncated scan", slug, ok)
+	}
+	if _, ok := parseAgentIDs(path2); ok {
+		t.Errorf("parseAgentIDs ok = true, want false on a truncated scan")
+	}
+}
+
+// End to end: when the transcript scan is cut short, artifacts whose ownership
+// is only provable by records inside that transcript must not be deleted. The
+// plan file is held back because the slug lookup reports itself as unsure; agent
+// memory is simply never attributed, since its id is never read.
+func TestFindRelatedFiles_TruncatedScanKeepsUncertainArtifacts(t *testing.T) {
+	setupStorageDirs(t)
+
+	uuid := "deadbeef-1234-5678-abcd-000000000004"
+	projDir := filepath.Join(projectsDir, "proj")
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// The slug and agent id sit behind a record larger than the cap.
+	oversized := strings.Repeat("x", 4096)
+	lines := []string{
+		`{"type":"user","message":{"content":"` + oversized + `"},"isMeta":false}`,
+		`{"type":"user","slug":"lonely-slug","agentId":"agent-7"}`,
+	}
+	jsonlPath := filepath.Join(projDir, uuid+".jsonl")
+	if err := os.WriteFile(jsonlPath, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	planFile := filepath.Join(plansDir, "lonely-slug.md")
+	if err := os.WriteFile(planFile, []byte("plan"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	agentMemory := filepath.Join(agentsDir, "agent-7", "memory-local.md")
+	if err := os.MkdirAll(filepath.Dir(agentMemory), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentMemory, []byte("memory"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity check: with a full scan both artifacts are found.
+	found := make(map[string]bool)
+	for _, f := range findRelatedFiles(uuid) {
+		found[f] = true
+	}
+	if !found[planFile] || !found[agentMemory] {
+		t.Fatalf("baseline failed: plan=%v memory=%v", found[planFile], found[agentMemory])
+	}
+
+	// Now cap records below the oversized one, so the scan cannot reach them.
+	orig := jsonlScanTokenMax
+	jsonlScanTokenMax = 512
+	defer func() { jsonlScanTokenMax = orig }()
+
+	found = make(map[string]bool)
+	for _, f := range findRelatedFiles(uuid) {
+		found[f] = true
+	}
+	if found[planFile] {
+		t.Errorf("plan file scheduled for deletion after a truncated scan: %s", planFile)
+	}
+	if found[agentMemory] {
+		t.Errorf("agent memory scheduled for deletion after a truncated scan: %s", agentMemory)
+	}
+	// The transcript itself is still identified by filename, so it stays covered.
+	if !found[jsonlPath] {
+		t.Errorf("transcript missing from the deletion set: %s", jsonlPath)
+	}
+}
+
 // An empty uuid must never match anything: job state with an absent sessionId
 // reads back as an empty string.
 func TestFindRelatedFiles_EmptyUUID(t *testing.T) {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,8 +15,18 @@ import (
 )
 
 const (
-	CurrentVersion = "0.3.7"
+	CurrentVersion = "0.3.8"
 	GitHubAPIURL   = "https://api.github.com/repos/ataleckij/claude-chats-delete/releases/latest"
+
+	// Network timeouts. The checksums file is a few hundred bytes; the binary is
+	// several megabytes and may come over a slow link, so it gets a wider budget.
+	// Both are bounded so an unresponsive host cannot hang the TUI indefinitely.
+	checksumFetchTimeout = 15 * time.Second
+	binaryFetchTimeout   = 5 * time.Minute
+
+	// checksumsMaxBytes caps the checksums file read. Reading one byte past it
+	// makes truncation detectable instead of silently accepted.
+	checksumsMaxBytes = 1 << 20
 )
 
 // GitHubRelease represents the GitHub API response for a release
@@ -129,12 +141,71 @@ func promptAndUpdate(newVersion string) bool {
 	return true // User declined
 }
 
-// downloadAndInstall downloads the binary and replaces the current executable
+// parseChecksum returns the SHA-256 recorded for binaryName in the contents of a
+// checksums.txt file ("<hex>  <name>", with an optional "*" binary-mode marker).
+// The name is matched exactly, so one asset cannot be satisfied by another whose
+// name merely contains it.
+func parseChecksum(content, binaryName string) (string, error) {
+	for _, line := range strings.Split(content, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		if strings.TrimPrefix(fields[1], "*") != binaryName {
+			continue
+		}
+		digest := strings.ToLower(fields[0])
+		if len(digest) != sha256.Size*2 {
+			return "", fmt.Errorf("malformed checksum entry for %s: expected %d hex chars, got %q", binaryName, sha256.Size*2, fields[0])
+		}
+		if _, err := hex.DecodeString(digest); err != nil {
+			return "", fmt.Errorf("malformed checksum entry for %s: %q is not hex", binaryName, fields[0])
+		}
+		return digest, nil
+	}
+	return "", fmt.Errorf("no checksum entry for %s", binaryName)
+}
+
+// fetchChecksum downloads the release checksums file and returns the expected
+// SHA-256 for binaryName.
+func fetchChecksum(version, binaryName string) (string, error) {
+	url := fmt.Sprintf("https://github.com/ataleckij/claude-chats-delete/releases/download/v%s/checksums.txt", version)
+	client := &http.Client{Timeout: checksumFetchTimeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("failed to download checksums: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("checksums download failed with status: %d", resp.StatusCode)
+	}
+
+	content, err := io.ReadAll(io.LimitReader(resp.Body, checksumsMaxBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("failed to read checksums: %w", err)
+	}
+	if len(content) > checksumsMaxBytes {
+		return "", fmt.Errorf("checksums file exceeds %d bytes", checksumsMaxBytes)
+	}
+	return parseChecksum(string(content), binaryName)
+}
+
+// downloadAndInstall downloads the binary and replaces the current executable.
+// The download is verified against the release checksum before it is installed;
+// a missing or mismatched checksum aborts the update.
 func downloadAndInstall(version string) error {
 	// Determine platform-specific binary name
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 	binaryName := fmt.Sprintf("claude-chats-%s-%s", goos, goarch)
+
+	// Fetch the expected digest first: without it the download cannot be trusted
+	// and there is no point transferring the binary.
+	expectedSum, err := fetchChecksum(version, binaryName)
+	if err != nil {
+		return fmt.Errorf("refusing to install unverified binary: %w", err)
+	}
 
 	// Download URL
 	url := fmt.Sprintf("https://github.com/ataleckij/claude-chats-delete/releases/download/v%s/%s", version, binaryName)
@@ -148,7 +219,8 @@ func downloadAndInstall(version string) error {
 	defer os.Remove(tmpPath) // Clean up on error
 
 	// Download binary
-	resp, err := http.Get(url)
+	client := &http.Client{Timeout: binaryFetchTimeout}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
@@ -158,12 +230,17 @@ func downloadAndInstall(version string) error {
 		return fmt.Errorf("download failed with status: %d", resp.StatusCode)
 	}
 
-	// Write to temp file
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+	// Write to temp file, hashing the same bytes in one pass
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmpFile, hasher), resp.Body); err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("failed to write binary: %w", err)
 	}
 	tmpFile.Close()
+
+	if gotSum := hex.EncodeToString(hasher.Sum(nil)); gotSum != expectedSum {
+		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", binaryName, expectedSum, gotSum)
+	}
 
 	// Make executable
 	if err := os.Chmod(tmpPath, 0755); err != nil {

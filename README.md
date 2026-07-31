@@ -8,7 +8,7 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code **v2.1.215**.
+Tested with Claude Code **v2.1.220**.
 
 **Chats view**
 
