@@ -345,6 +345,12 @@ func updateSessionsIndex(uuid string) error {
 }
 
 func findRelatedFiles(uuid string) []string {
+	// Guard against an empty uuid: the lookups below build paths and globs from
+	// it, and an empty one would match unrelated sessions' state.
+	if uuid == "" {
+		return nil
+	}
+
 	var files []string
 	var chatJSONLPath string
 
@@ -368,32 +374,28 @@ func findRelatedFiles(uuid string) []string {
 		}
 	}
 
-	// Plan file (via slug)
-	if chatJSONLPath != "" {
-		slug := getSlugFromChat(chatJSONLPath)
-		if slug != "" && !isSlugUsedInOtherChats(slug, uuid) {
-			planFile := filepath.Join(plansDir, slug+".md")
-			if _, err := os.Stat(planFile); err == nil {
-				files = append(files, planFile)
-			}
-		}
-	}
-
 	// Debug file
 	debugFile := filepath.Join(debugDir, uuid+".txt")
 	if _, err := os.Stat(debugFile); err == nil {
 		files = append(files, debugFile)
 	}
 
-	// Session-scoped security warning dedupe state (security-guidance hook)
-	securityWarningsStateFile := filepath.Join(claudeDir, "security_warnings_state_"+uuid+".json")
-	if _, err := os.Stat(securityWarningsStateFile); err == nil {
-		files = append(files, securityWarningsStateFile)
+	// Session-scoped security warning dedupe state (security-guidance hook),
+	// including the sidecar lock file written next to it.
+	for _, ext := range []string{".json", ".lock"} {
+		p := filepath.Join(securityDir, "security_warnings_state_"+uuid+ext)
+		if _, err := os.Stat(p); err == nil {
+			files = append(files, p)
+		}
 	}
 
-	// Todo files
-	todoMatches, _ := filepath.Glob(filepath.Join(todosDir, uuid+"*.json"))
-	files = append(files, todoMatches...)
+	// Failed telemetry events, named 1p_failed_events.<session-uuid>.<id>.json.
+	// The uuid must be a whole dot-separated component: a bare substring match
+	// would also hit files that merely carry it as their trailing id.
+	telemetryMatches, _ := filepath.Glob(filepath.Join(telemetryDir, "*."+uuid+".*.json"))
+	files = append(files, telemetryMatches...)
+
+	files = append(files, jobRelatedFiles(uuid)...)
 
 	// Session directory
 	sessionPath := filepath.Join(sessionDir, uuid)
@@ -413,27 +415,115 @@ func findRelatedFiles(uuid string) []string {
 		files = append(files, fileHistoryPath)
 	}
 
-	// Agent memory files (v2.1.33+)
-	// Parse agent IDs from chat JSONL and delete local scope memory
-	//
-	// TODO: sub-agents can now spawn their own sub-agents up to 5 levels deep
-	// (background since v2.1.172, foreground since v2.1.181). parseAgentIDs only
-	// scans the main chat JSONL, so a nested agent whose agentId appears only in
-	// a sub-agent transcript (under the subagents/ dir) could leave an orphaned
-	// agents/<id>/memory-local.md. Verify on disk whether nested agentIds surface
-	// in the main JSONL; if not, scan the subagents/ transcripts recursively too.
+	files = append(files, legacyRelatedFiles(uuid, chatJSONLPath)...)
+
+	return files
+}
+
+// jobState is the part of jobs/<id>/state.json this tool relies on.
+type jobState struct {
+	SessionID           string `json:"sessionId"`
+	ForkParentSessionID string `json:"forkParentSessionId"`
+}
+
+func readJobState(dir string) (jobState, bool) {
+	data, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	if err != nil {
+		return jobState{}, false
+	}
+	var s jobState
+	if err := json.Unmarshal(data, &s); err != nil {
+		return jobState{}, false
+	}
+	return s, true
+}
+
+// jobRelatedFiles returns background-job state belonging to a session
+// (v2.1.212+). Job directories are named after the first 8 hex chars of the
+// session uuid, so every candidate is confirmed against the sessionId recorded
+// inside its state.json before being scheduled for deletion. jobs/pins.json is
+// global and never returned.
+//
+// A fork keeps a copy of its parent's transcript in tmp/parent-transcript.jsonl.
+// That copy is returned when the parent is the session being deleted, so the
+// parent's content does not survive in the fork's job directory; the fork's own
+// transcript is self-contained and stays usable.
+func jobRelatedFiles(uuid string) []string {
+	// A job whose state.json omits sessionId reads back as an empty string, so
+	// an empty uuid would match it.
+	if uuid == "" {
+		return nil
+	}
+
+	entries, err := os.ReadDir(jobsDir)
+	if err != nil {
+		return nil
+	}
+
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(jobsDir, e.Name())
+		state, ok := readJobState(dir)
+		if !ok {
+			continue
+		}
+		switch uuid {
+		case state.SessionID:
+			files = append(files, dir)
+		case state.ForkParentSessionID:
+			parentCopy := filepath.Join(dir, "tmp", "parent-transcript.jsonl")
+			if _, err := os.Stat(parentCopy); err == nil {
+				files = append(files, parentCopy)
+			}
+		}
+	}
+	return files
+}
+
+// legacyRelatedFiles returns session files from the pre-v2.1.220 layout. These
+// paths are no longer created by current Claude Code versions, but histories
+// written by older ones still carry them, so they stay probed during the
+// transition. Each entry is a no-op when the directory does not exist.
+func legacyRelatedFiles(uuid, chatJSONLPath string) []string {
+	var files []string
+
+	// Security warning state used to live directly in the Claude dir before it
+	// moved into security/.
+	securityWarningsStateFile := filepath.Join(claudeDir, "security_warnings_state_"+uuid+".json")
+	if _, err := os.Stat(securityWarningsStateFile); err == nil {
+		files = append(files, securityWarningsStateFile)
+	}
+
+	// Todo files
+	todoMatches, _ := filepath.Glob(filepath.Join(todosDir, uuid+"*.json"))
+	files = append(files, todoMatches...)
+
+	// Plan file (via slug), deleted only when no other chat references the slug
 	if chatJSONLPath != "" {
-		agentIDs := parseAgentIDs(chatJSONLPath)
-		for _, agentID := range agentIDs {
-			// Delete local scope memory (always tied to this chat session)
+		slug := getSlugFromChat(chatJSONLPath)
+		if slug != "" && !isSlugUsedInOtherChats(slug, uuid) {
+			planFile := filepath.Join(plansDir, slug+".md")
+			if _, err := os.Stat(planFile); err == nil {
+				files = append(files, planFile)
+			}
+		}
+	}
+
+	// Session-scoped agent memory (v2.1.33+). Agent memory now lives in
+	// agent-memory/<agent-name>/ and is project-scoped, so it is preserved on
+	// delete; only the old per-agent memory-local.md was session-scoped.
+	if chatJSONLPath != "" {
+		for _, agentID := range parseAgentIDs(chatJSONLPath) {
 			localMemory := filepath.Join(agentsDir, agentID, "memory-local.md")
 			if _, err := os.Stat(localMemory); err == nil {
 				files = append(files, localMemory)
 			}
 
-			// Note: We don't delete memory-project.md or memory-user.md as they may be
-			// shared across multiple chats. Consider implementing reference counting
-			// in a future version if needed.
+			// memory-project.md and memory-user.md may be shared across chats
+			// and are intentionally kept.
 		}
 	}
 

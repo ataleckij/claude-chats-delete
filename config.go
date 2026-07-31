@@ -85,32 +85,45 @@ var (
 	claudeDir      string
 	projectsDir    string
 	debugDir       string
-	todosDir       string
 	sessionDir     string
 	tasksDir       string
 	fileHistoryDir string
-	plansDir       string
-	agentsDir      string
+	securityDir    string
+	telemetryDir   string
+	jobsDir        string
+
+	// Legacy layout, still probed for histories written by older Claude Code
+	// versions. Verified absent on v2.1.220: todos/ and plans/ are no longer
+	// created, security warning state moved into security/, and agents/ now
+	// holds only agent definitions (memory moved to agent-memory/, which is
+	// project-scoped and therefore preserved on delete).
+	todosDir  string
+	plansDir  string
+	agentsDir string
 )
 
-// TODO: directories under ~/.claude that are not yet covered. For each, decide
-// whether per-chat cleanup applies (UUID-keyed -> include in findRelatedFiles)
-// or whether it belongs to a global retention pool (timestamp-keyed -> ignore).
-//   - worktrees/  (v2.1.157+) background-agent git worktrees
-//   - workflows/  (v2.1.154+) dynamic-workflow run state
-//   - jobs/       (v2.1.212+) background-session job state, keyed by the first
-//                 8 hex chars of the session UUID (state.json, timeline.jsonl).
-//                 A fork's tmp/parent-transcript.jsonl holds a COPY of the
-//                 parent session's transcript, so deleting the parent leaves
-//                 its content behind here. pins.json in the same dir is global.
-// Inspect on-disk layout before adding; do not guess UUID-keyed-ness from the name.
+// Directories under ~/.claude surveyed on v2.1.220, with their cleanup status:
+//   - sessions/    runtime registry of live sessions, keyed by PID (holds
+//                  sessionId, status). Owned by the running process, not the
+//                  history: not deleted per chat.
+//   - daemon/      supervisor state (roster.json lists live workers, control
+//                  key, dispatch dir). Session ids appear only while a worker
+//                  runs: runtime state, not deleted per chat.
+//   - agent-memory/<agent>/  per-agent memory, project-scoped: preserved.
+//   - worktrees/, workflows/  absent at user level; worktrees live in a
+//                  project's own .claude/, so they are out of scope here.
+//   - jobs/        background-session state, covered by findRelatedFiles.
+//                  pins.json in that directory is global and never removed.
+//
+// TODO: verify later, purpose unknown - downloads/ has stayed empty since it
+// appeared, so there is nothing to judge yet. Re-check whether it becomes
+// session-keyed, and re-survey after Claude Code layout changes.
 
-// TODO: fork/parent handling (verified on v2.1.215): fork JSONLs are full
-// self-contained copies, so deleting a parent does not break a fork's history.
-// Remaining work: fork detection for v2.1.212+ must read
-// ~/.claude/jobs/<id>/state.json (forkParentSessionId) since transcripts no
-// longer carry forkedFrom; and deleting a parent still leaves a copy of its
-// transcript in the fork's jobs tmp dir (see the jobs/ entry above).
+// TODO: fork detection is not implemented. Since v2.1.212 transcripts no longer
+// carry forkedFrom, so a fork's parent can only be found by reading
+// jobs/<id>/state.json (forkParentSessionId). Needed for "(Branch of …)" labels;
+// not needed for safe deletion, since fork transcripts are self-contained
+// (verified on v2.1.215).
 
 // Config management
 
@@ -174,10 +187,15 @@ func initializePaths(dir string) {
 	claudeDir = dir
 	projectsDir = filepath.Join(claudeDir, "projects")
 	debugDir = filepath.Join(claudeDir, "debug")
-	todosDir = filepath.Join(claudeDir, "todos")
 	sessionDir = filepath.Join(claudeDir, "session-env")
 	tasksDir = filepath.Join(claudeDir, "tasks")
 	fileHistoryDir = filepath.Join(claudeDir, "file-history")
+	securityDir = filepath.Join(claudeDir, "security")
+	telemetryDir = filepath.Join(claudeDir, "telemetry")
+	jobsDir = filepath.Join(claudeDir, "jobs")
+
+	// Legacy layout (see the var block above)
+	todosDir = filepath.Join(claudeDir, "todos")
 	plansDir = filepath.Join(claudeDir, "plans")
 	agentsDir = filepath.Join(claudeDir, "agents")
 }

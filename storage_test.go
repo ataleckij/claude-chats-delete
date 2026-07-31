@@ -410,6 +410,9 @@ func setupStorageDirs(t *testing.T) string {
 	origSession := sessionDir
 	origTasks := tasksDir
 	origFileHistory := fileHistoryDir
+	origSecurity := securityDir
+	origTelemetry := telemetryDir
+	origJobs := jobsDir
 	origPlans := plansDir
 	origAgents := agentsDir
 
@@ -420,10 +423,13 @@ func setupStorageDirs(t *testing.T) string {
 	sessionDir = filepath.Join(tmp, "session-env")
 	tasksDir = filepath.Join(tmp, "tasks")
 	fileHistoryDir = filepath.Join(tmp, "file-history")
+	securityDir = filepath.Join(tmp, "security")
+	telemetryDir = filepath.Join(tmp, "telemetry")
+	jobsDir = filepath.Join(tmp, "jobs")
 	plansDir = filepath.Join(tmp, "plans")
 	agentsDir = filepath.Join(tmp, "agents")
 
-	for _, d := range []string{projectsDir, debugDir, todosDir, sessionDir, tasksDir, fileHistoryDir, plansDir, agentsDir} {
+	for _, d := range []string{projectsDir, debugDir, todosDir, sessionDir, tasksDir, fileHistoryDir, securityDir, telemetryDir, jobsDir, plansDir, agentsDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatalf("mkdir %s: %v", d, err)
 		}
@@ -437,6 +443,9 @@ func setupStorageDirs(t *testing.T) string {
 		sessionDir = origSession
 		tasksDir = origTasks
 		fileHistoryDir = origFileHistory
+		securityDir = origSecurity
+		telemetryDir = origTelemetry
+		jobsDir = origJobs
 		plansDir = origPlans
 		agentsDir = origAgents
 	})
@@ -501,6 +510,160 @@ func TestFindRelatedFiles(t *testing.T) {
 		if !found[path] {
 			t.Errorf("findRelatedFiles missing %s artifact: %s", key, path)
 		}
+	}
+}
+
+// Current layout: security warning state lives in security/ (with a .lock
+// sidecar) and failed telemetry events are keyed by session uuid.
+func TestFindRelatedFiles_CurrentLayout(t *testing.T) {
+	setupStorageDirs(t)
+
+	uuid := "deadbeef-1234-5678-abcd-000000000002"
+	projDir := filepath.Join(projectsDir, "proj")
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	jsonlPath := filepath.Join(projDir, uuid+".jsonl")
+	if err := os.WriteFile(jsonlPath, []byte("{\"type\":\"user\"}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{
+		filepath.Join(securityDir, "security_warnings_state_"+uuid+".json"),
+		filepath.Join(securityDir, "security_warnings_state_"+uuid+".lock"),
+		filepath.Join(telemetryDir, "1p_failed_events."+uuid+".abc123.json"),
+	}
+	for _, p := range want {
+		if err := os.WriteFile(p, []byte("{}"), 0644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+
+	// Another session's telemetry must not be picked up, including a file where
+	// our uuid only appears as the trailing id component.
+	other := filepath.Join(telemetryDir, "1p_failed_events.99999999-0000-0000-0000-000000000000.x.json")
+	if err := os.WriteFile(other, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	otherAsID := filepath.Join(telemetryDir, "1p_failed_events.99999999-0000-0000-0000-000000000000."+uuid+".json")
+	if err := os.WriteFile(otherAsID, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	found := make(map[string]bool)
+	for _, f := range findRelatedFiles(uuid) {
+		found[f] = true
+	}
+
+	for _, p := range want {
+		if !found[p] {
+			t.Errorf("findRelatedFiles missing %s", p)
+		}
+	}
+	if found[other] {
+		t.Errorf("findRelatedFiles picked up another session's telemetry: %s", other)
+	}
+	if found[otherAsID] {
+		t.Errorf("findRelatedFiles matched the uuid outside the session component: %s", otherAsID)
+	}
+}
+
+// Background job state is keyed by an 8-char uuid prefix, so entries are matched
+// on the sessionId inside state.json. A fork's copy of the parent transcript is
+// removed together with the parent.
+func TestFindRelatedFiles_JobState(t *testing.T) {
+	setupStorageDirs(t)
+
+	uuid := "deadbeef-1234-5678-abcd-000000000003"
+	projDir := filepath.Join(projectsDir, "proj")
+	if err := os.MkdirAll(projDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, uuid+".jsonl"), []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeJob := func(dir, state string) string {
+		p := filepath.Join(jobsDir, dir)
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(p, "state.json"), []byte(state), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	ownJob := writeJob("deadbeef", `{"sessionId":"`+uuid+`"}`)
+
+	// Same 8-char prefix, different session: must not be touched.
+	collidingJob := writeJob("deadbeef-other", `{"sessionId":"deadbeef-1234-5678-abcd-999999999999"}`)
+
+	// A fork of our session keeps a copy of our transcript.
+	forkJob := writeJob("aaaa1111", `{"sessionId":"aaaa1111-0000-0000-0000-000000000000","forkParentSessionId":"`+uuid+`"}`)
+	forkTmp := filepath.Join(forkJob, "tmp")
+	if err := os.MkdirAll(forkTmp, 0755); err != nil {
+		t.Fatal(err)
+	}
+	parentCopy := filepath.Join(forkTmp, "parent-transcript.jsonl")
+	if err := os.WriteFile(parentCopy, []byte("{}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Global pin state, and a job whose state cannot be read: both must survive.
+	pins := filepath.Join(jobsDir, "pins.json")
+	if err := os.WriteFile(pins, []byte(`{"pinned":[]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	brokenJob := writeJob("bbbb2222", `{not json`)
+	statelessJob := filepath.Join(jobsDir, "cccc3333")
+	if err := os.MkdirAll(statelessJob, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	found := make(map[string]bool)
+	for _, f := range findRelatedFiles(uuid) {
+		found[f] = true
+	}
+
+	if !found[ownJob] {
+		t.Errorf("missing own job dir: %s", ownJob)
+	}
+	if !found[parentCopy] {
+		t.Errorf("missing fork's parent transcript copy: %s", parentCopy)
+	}
+	if found[collidingJob] {
+		t.Errorf("deleted a job dir belonging to another session: %s", collidingJob)
+	}
+	if found[forkJob] {
+		t.Errorf("deleted the whole fork job dir, expected only its parent copy: %s", forkJob)
+	}
+	if found[pins] {
+		t.Errorf("deleted global jobs/pins.json")
+	}
+	if found[brokenJob] {
+		t.Errorf("deleted a job dir with unparsable state.json: %s", brokenJob)
+	}
+	if found[statelessJob] {
+		t.Errorf("deleted a job dir without state.json: %s", statelessJob)
+	}
+}
+
+// An empty uuid must never match anything: job state with an absent sessionId
+// reads back as an empty string.
+func TestFindRelatedFiles_EmptyUUID(t *testing.T) {
+	setupStorageDirs(t)
+
+	jobDir := filepath.Join(jobsDir, "dddd4444")
+	if err := os.MkdirAll(jobDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jobDir, "state.json"), []byte(`{"state":"done"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := findRelatedFiles(""); len(got) != 0 {
+		t.Errorf("findRelatedFiles(\"\") returned %v, want nothing", got)
 	}
 }
 

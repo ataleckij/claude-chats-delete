@@ -21,7 +21,7 @@ Tested with Claude Code **v2.1.215**.
 ## 2. Features
 
 - Browse chat sessions across all projects, with optional grouped-by-project view
-- Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, todos, tasks, plans, agent memory, and more)
+- Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, tasks, background job state, security and telemetry leftovers, and more)
 - Copy chat UUID to clipboard
 - Keyboard-driven interface with vim keys and fast page navigation
 - Auto-update via GitHub releases
@@ -33,22 +33,31 @@ Deleting a chat removes its full on-disk footprint, not just the transcript:
 ```
 ~/.claude/
 ├── projects/<project>/
-│   ├── <uuid>.jsonl                     # main transcript
-│   ├── <uuid>/                          # subagents/ + tool-results/
-│   └── sessions-index.json              # entry removed (if the index exists)
-├── todos/<uuid>-*.json                  # todo lists
-├── tasks/<uuid>/                        # task state
-├── file-history/<uuid>/                 # pre-edit file snapshots
-├── session-env/<uuid>/                  # session environment
-├── debug/<uuid>.txt                     # debug log
-├── security_warnings_state_<uuid>.json  # security-hook dedupe state
-├── plans/<slug>.md                      # plan file (only if no other chat uses it)
-└── agents/<agent-id>/memory-local.md    # session-scoped agent memory
+│   ├── <uuid>.jsonl                          # main transcript
+│   ├── <uuid>/                               # subagents/ + tool-results/
+│   └── sessions-index.json                   # entry removed (if the index exists)
+├── tasks/<uuid>/                             # task state
+├── file-history/<uuid>/                      # pre-edit file snapshots
+├── session-env/<uuid>/                       # session environment
+├── debug/<uuid>.txt                          # debug log
+├── security/security_warnings_state_<uuid>.* # security-hook dedupe state + lock
+├── telemetry/*<uuid>*.json                   # failed telemetry events
+└── jobs/<uuid-prefix>/                       # background session state
 ```
 
-Project- and user-scoped state (`projects/<project>/memory/`, `memory-project.md`,
-`memory-user.md`) is preserved. See [docs/deletion-behavior.md](docs/deletion-behavior.md)
-for the full breakdown and the confirmation flow.
+For a background session that was forked from the chat being deleted, the copy
+of the parent transcript it keeps (`jobs/<fork>/tmp/parent-transcript.jsonl`) is
+removed too; the fork's own transcript is self-contained and stays usable.
+
+Older Claude Code layouts are still cleaned up when present: `todos/<uuid>-*.json`,
+`plans/<slug>.md` (only if no other chat uses the slug),
+`agents/<agent-id>/memory-local.md`, and `security_warnings_state_<uuid>.json` in
+the Claude directory root.
+
+Project- and user-scoped state (`projects/<project>/memory/`,
+`agent-memory/<agent>/`, `memory-project.md`, `memory-user.md`) is preserved. See
+[docs/deletion-behavior.md](docs/deletion-behavior.md) for the full breakdown and
+the confirmation flow.
 
 ## 4. Installation
 
