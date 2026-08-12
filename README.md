@@ -1,3 +1,5 @@
+
+
 # Claude Code Chats Delete TUI
 
 ## 1. Overview
@@ -64,7 +66,7 @@ the confirmation flow.
 ### Quick Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/install.sh | sh
+curl -sSL https://raw.githubusercontent.com/ataleckij/claude-chats-delete/main/install.sh | bash
 ```
 
 This will:
