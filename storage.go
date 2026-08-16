@@ -59,14 +59,14 @@ func findAllChats() []Chat {
 		// }
 
 		// Scan all JSONL files (original behavior)
-		files, err := filepath.Glob(filepath.Join(projectPath, "*.jsonl"))
+		files, err := filepath.Glob(filepath.Join(projectPath, "*"+transcriptExt))
 		if err != nil {
 			continue
 		}
 
 		for _, file := range files {
 			basename := filepath.Base(file)
-			uuid := strings.TrimSuffix(basename, ".jsonl")
+			uuid := strings.TrimSuffix(basename, transcriptExt)
 
 			// Skip agent files
 			if strings.HasPrefix(uuid, "agent-") {
@@ -191,29 +191,29 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 		}
 
 		// /rename writes a dedicated record; last one wins.
-		if msg.Type == "custom-title" && msg.CustomTitle != "" {
+		if msg.Type == recordCustomTitle && msg.CustomTitle != "" {
 			lastCustomTitle = msg.CustomTitle
 			continue
 		}
 
 		// Auto-generated title; rewritten as the conversation evolves, last wins.
-		if msg.Type == "ai-title" && msg.AiTitle != "" {
+		if msg.Type == recordAiTitle && msg.AiTitle != "" {
 			lastAiTitle = msg.AiTitle
 			continue
 		}
 
 		// Readable session name (e.g. named background sessions); last wins.
-		if msg.Type == "agent-name" && msg.AgentName != "" {
+		if msg.Type == recordAgentName && msg.AgentName != "" {
 			lastAgentName = msg.AgentName
 			continue
 		}
 
-		if firstSummary == "" && msg.Type == "summary" && msg.Summary != "" {
+		if firstSummary == "" && msg.Type == recordSummary && msg.Summary != "" {
 			firstSummary = msg.Summary
 			continue
 		}
 
-		if firstUserMsg == "" && msg.Type == "user" && !msg.IsMeta {
+		if firstUserMsg == "" && msg.Type == recordUser && !msg.IsMeta {
 			if c := cleanSystemTags(msg.Message.Content); c != "" {
 				firstUserMsg = c
 			}
@@ -297,13 +297,13 @@ func isSlugUsedInOtherChats(slug string, excludeUUID string) bool {
 		return false
 	}
 
-	matches, err := filepath.Glob(filepath.Join(projectsDir, "*", "*.jsonl"))
+	matches, err := filepath.Glob(filepath.Join(projectsDir, "*", "*"+transcriptExt))
 	if err != nil {
 		return true // safe default: keep plan file if we cannot verify
 	}
 
 	for _, path := range matches {
-		uuid := strings.TrimSuffix(filepath.Base(path), ".jsonl")
+		uuid := strings.TrimSuffix(filepath.Base(path), transcriptExt)
 		if uuid == excludeUUID {
 			continue
 		}
@@ -411,7 +411,7 @@ func findRelatedFiles(chat Chat) []string {
 
 		// Chat directory (same name as the jsonl, without the extension), which
 		// holds subagents/ and tool-results/.
-		chatDir := strings.TrimSuffix(chat.Path, ".jsonl")
+		chatDir := strings.TrimSuffix(chat.Path, transcriptExt)
 		if _, err := os.Stat(chatDir); err == nil {
 			files = append(files, chatDir)
 		}

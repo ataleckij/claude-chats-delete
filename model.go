@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -117,6 +118,11 @@ type model struct {
 
 	// Settings tab
 	settingsCursor int
+
+	// Claude directory editing: while editingDir is set, key presses build up
+	// dirInput instead of driving the settings list.
+	editingDir bool
+	dirInput   string
 
 	// Grouped view state
 	grouped          bool
@@ -251,6 +257,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// The directory editor takes every key before the global bindings, so a
+		// typed q or arrow key edits the path instead of quitting or switching
+		// tabs.
+		if m.editingDir {
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				// Quitting stays available everywhere; Esc is the way out of
+				// the editor itself.
+				return m, tea.Quit
+			case tea.KeyEnter:
+				m.editingDir = false
+				if dir := expandHome(strings.TrimSpace(m.dirInput)); dir != "" && dir != claudeDir {
+					initializePaths(dir)
+					if m.cfg != nil {
+						m.cfg.ClaudeDir = dir
+						saveConfig(m.cfg)
+					}
+					// Everything derived from the old directory goes: chats,
+					// selection and its auto-select flag, expanded projects,
+					// and the viewport position.
+					m.chats = findAllChats()
+					m.selected = make(map[int]bool)
+					m.autoSelected = false
+					m.expandedProjects = make(map[string]bool)
+					m.cursor = 0
+					m.scrollOffset = 0
+					if m.grouped {
+						m.rebuildGroupRows()
+					}
+				}
+			case tea.KeyEsc:
+				m.editingDir = false
+			case tea.KeyBackspace:
+				if r := []rune(m.dirInput); len(r) > 0 {
+					m.dirInput = string(r[:len(r)-1])
+				}
+			case tea.KeyRunes, tea.KeySpace:
+				m.dirInput += string(msg.Runes)
+			}
+			return m, nil
+		}
+
 		// Global keys
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
@@ -279,6 +327,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.settingsCursor++
 				}
 			case "enter":
+				if m.settingsCursor == settingClaudeDir {
+					m.editingDir = true
+					m.dirInput = claudeDir
+					return m, nil
+				}
 				if m.cfg != nil {
 					switch m.settingsCursor {
 					case settingAutoUpdates:
@@ -483,9 +536,10 @@ func (m *model) adjustScroll() {
 }
 
 const (
-	settingAutoUpdates   = 0
+	settingAutoUpdates    = 0
 	settingGroupByProject = 1
-	settingsCount        = 2
+	settingClaudeDir      = 2
+	settingsCount         = 3
 )
 
 func (m model) viewSettings() string {
@@ -534,10 +588,34 @@ func (m model) viewSettings() string {
 	}
 	s.WriteString("\n")
 
+	// Claude directory: shown always, editable in place
+	dirValue := claudeDir
+	if m.editingDir {
+		dirValue = m.dirInput + "_"
+	}
+	dirLine := fmt.Sprintf("  Claude directory  %s", dirValue)
+	switch {
+	case m.editingDir:
+		s.WriteString(selectedStyle.Render(dirLine))
+	case m.settingsCursor == settingClaudeDir:
+		s.WriteString(cursorStyle.Render(dirLine))
+	default:
+		s.WriteString(dirLine)
+	}
+	s.WriteString("\n")
+	if env := strings.TrimSpace(os.Getenv(claudeConfigDirEnv)); env != "" && env != claudeDir {
+		s.WriteString(dimStyle.Render(fmt.Sprintf("                    %s is set to %s", claudeConfigDirEnv, env)))
+		s.WriteString("\n")
+	}
+
 	s.WriteString("\n")
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
-	s.WriteString(helpStyle.Render("↑/↓:Navigate | Enter:Toggle | ←/→:Switch tabs | q:Quit"))
+	if m.editingDir {
+		s.WriteString(helpStyle.Render("Type a path | Enter:Save | Esc:Cancel"))
+	} else {
+		s.WriteString(helpStyle.Render("↑/↓:Navigate | Enter:Toggle/Edit | ←/→:Switch tabs | q:Quit"))
+	}
 	s.WriteString("\n")
 	return s.String()
 }
@@ -594,9 +672,6 @@ func (m model) View() string {
 	// Header
 	s.WriteString(m.renderTabBar())
 	s.WriteString("\n")
-
-
-
 
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")

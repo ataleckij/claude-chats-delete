@@ -93,3 +93,25 @@ func TestParseChecksumRejectsMalformedDigest(t *testing.T) {
 		})
 	}
 }
+
+func TestIsNewerVersion(t *testing.T) {
+	tests := []struct {
+		latest, current string
+		want            bool
+	}{
+		// A two-digit patch must beat a single-digit one: string comparison
+		// would put "0.3.10" before "0.3.9" and stop offering updates.
+		{"0.3.10", "0.3.9", true},
+		{"0.3.9", "0.3.10", false},
+		{"0.4.0", "0.3.10", true},
+		{"1.0.0", "0.9.9", true},
+		{"0.3.9", "0.3.9", false},
+		{"0.3.8", "0.3.9", false},
+	}
+
+	for _, tt := range tests {
+		if got := isNewerVersion(tt.latest, tt.current); got != tt.want {
+			t.Errorf("isNewerVersion(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
+		}
+	}
+}

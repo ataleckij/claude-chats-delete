@@ -80,6 +80,28 @@ type SessionEntry struct {
 	IsSidechain  bool   `json:"isSidechain"`
 }
 
+// Names owned by Claude Code. Kept in one place so a rename upstream is a
+// single-line change here.
+const (
+	claudeConfigDirEnv = "CLAUDE_CONFIG_DIR"
+	claudeDirName      = ".claude"
+
+	// Transcript file extension. Also identifies a chat's directory, which is
+	// the transcript path without it.
+	transcriptExt = ".jsonl"
+)
+
+// JSONL record types that carry a session's display title, in the order the
+// title falls back through. These have changed more than once upstream, so they
+// are declared together rather than inline.
+const (
+	recordCustomTitle = "custom-title" // written by /rename
+	recordAiTitle     = "ai-title"     // auto-generated, rewritten as the session evolves
+	recordAgentName   = "agent-name"   // readable session name
+	recordUser        = "user"
+	recordSummary     = "summary"
+)
+
 var (
 	configPath     = filepath.Join(os.Getenv("HOME"), ".config", "claude-chats", "config.json")
 	claudeDir      string
@@ -156,11 +178,97 @@ func saveConfig(config *Config) error {
 	return os.WriteFile(configPath, data, 0644)
 }
 
-func promptForClaudeDir() (string, error) {
-	defaultDir := filepath.Join(os.Getenv("HOME"), ".claude")
+// expandHome turns a leading ~ into the home directory and normalizes the
+// result, so paths that differ only by a trailing slash or a redundant
+// separator compare equal.
+func expandHome(path string) string {
+	if path == "" {
+		return ""
+	}
+	if strings.HasPrefix(path, "~") {
+		return filepath.Join(os.Getenv("HOME"), path[1:])
+	}
+	return filepath.Clean(path)
+}
 
-	fmt.Println("Claude Chat Manager - First Run Setup")
+// defaultClaudeDir is where Claude Code keeps its data unless CLAUDE_CONFIG_DIR
+// says otherwise.
+func defaultClaudeDir() string {
+	return filepath.Join(os.Getenv("HOME"), claudeDirName)
+}
+
+// systemClaudeDir is the directory the current environment points at: the
+// CLAUDE_CONFIG_DIR override when set, otherwise the default location.
+func systemClaudeDir() string {
+	if dir := strings.TrimSpace(os.Getenv(claudeConfigDirEnv)); dir != "" {
+		return expandHome(dir)
+	}
+	return defaultClaudeDir()
+}
+
+// dirAction is what the caller should do about the Claude directory before the
+// interface starts.
+type dirAction int
+
+const (
+	dirUseSaved    dirAction = iota // saved value already matches the environment
+	dirAskFirstRun                  // no saved value yet: ask which directory to use
+	dirAskSwitch                    // saved value differs from the environment: offer to switch
+	dirUseSystem                    // no prompt possible: follow the environment for this run only
+)
+
+// dirDecision carries the action plus the directory it applies to.
+type dirDecision struct {
+	action dirAction
+	dir    string
+}
+
+// resolveClaudeDir decides which Claude directory to use. saved is the value
+// from our config ("" when unset), system is what the environment points at,
+// and interactive reports whether we can ask the user.
+//
+// A decision made without asking is never written back to the config: outside a
+// terminal we follow the environment for this run and leave the saved value
+// untouched.
+func resolveClaudeDir(saved, system string, interactive bool) dirDecision {
+	// Compare normalized paths: a saved value and an environment value that
+	// differ only by a trailing slash are the same directory, and must not
+	// trigger the switch prompt on every start.
+	saved = expandHome(saved)
+	system = expandHome(system)
+
+	switch {
+	case saved == "":
+		if interactive {
+			return dirDecision{action: dirAskFirstRun, dir: system}
+		}
+		return dirDecision{action: dirUseSystem, dir: system}
+	case saved == system:
+		return dirDecision{action: dirUseSaved, dir: saved}
+	case interactive:
+		return dirDecision{action: dirAskSwitch, dir: system}
+	default:
+		return dirDecision{action: dirUseSystem, dir: system}
+	}
+}
+
+// isInteractive reports whether stdin is a terminal we can prompt on.
+func isInteractive() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// promptForClaudeDir asks for the Claude directory at first run. defaultDir is
+// what pressing Enter accepts; the caller has already resolved it.
+func promptForClaudeDir(defaultDir string) (string, error) {
+	fmt.Println("Claude Chats Delete - First Run Setup")
 	fmt.Println()
+	if env := strings.TrimSpace(os.Getenv(claudeConfigDirEnv)); env != "" {
+		fmt.Printf("%s is set: %s\n", claudeConfigDirEnv, env)
+	}
 	fmt.Printf("Enter the path to your Claude directory (default: %s)\n", defaultDir)
 	fmt.Print("Path [press Enter for default]: ")
 
@@ -175,12 +283,37 @@ func promptForClaudeDir() (string, error) {
 		return defaultDir, nil
 	}
 
-	// Expand ~ to home directory
-	if strings.HasPrefix(input, "~") {
-		input = filepath.Join(os.Getenv("HOME"), input[1:])
+	return expandHome(input), nil
+}
+
+// systemDirLabel names what the system path came from, so the switch prompt can
+// say whether the difference comes from CLAUDE_CONFIG_DIR or from the default
+// location (which is also what is compared against once the variable is gone).
+func systemDirLabel(envValue string) string {
+	if strings.TrimSpace(envValue) != "" {
+		return claudeConfigDirEnv
+	}
+	return "the default location"
+}
+
+// promptToSwitchClaudeDir asks whether to adopt the directory the environment
+// points at. Only an explicit yes switches.
+func promptToSwitchClaudeDir(saved, system string) (bool, error) {
+	label := systemDirLabel(os.Getenv(claudeConfigDirEnv))
+
+	fmt.Printf("Your saved Claude directory differs from %s:\n\n", label)
+	fmt.Printf("  saved:  %s\n", saved)
+	fmt.Printf("  system: %s\n\n", system)
+	fmt.Print("Switch to the system path and remember it? [y/N]: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return false, err
 	}
 
-	return input, nil
+	answer := strings.ToLower(strings.TrimSpace(input))
+	return answer == "y" || answer == "yes", nil
 }
 
 func initializePaths(dir string) {

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -661,5 +664,164 @@ func TestVisibleHeight(t *testing.T) {
 			t.Errorf("visibleHeight() with width=%d height=%d: got %d, want %d",
 				tt.width, tt.height, got, tt.want)
 		}
+	}
+}
+
+// settingsModel returns a model sitting on the Claude directory row of the
+// settings tab, with the package paths pointed at a scratch directory.
+func settingsModel(t *testing.T, dir string) model {
+	t.Helper()
+	origClaude := claudeDir
+	origConfigPath := configPath
+	initializePaths(dir)
+	configPath = filepath.Join(t.TempDir(), "config.json")
+	t.Cleanup(func() {
+		initializePaths(origClaude)
+		configPath = origConfigPath
+	})
+
+	return model{
+		tab:            tabSettings,
+		settingsCursor: settingClaudeDir,
+		cfg:            &Config{ClaudeDir: dir},
+		selected:       make(map[int]bool),
+		width:          normalWidth,
+		height:         30,
+	}
+}
+
+func TestSettings_EnterStartsDirEdit(t *testing.T) {
+	dir := t.TempDir()
+	m := settingsModel(t, dir)
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if !m.editingDir {
+		t.Fatal("Enter on the Claude directory row should start editing")
+	}
+	if m.dirInput != dir {
+		t.Errorf("dirInput = %q, want the current directory %q", m.dirInput, dir)
+	}
+}
+
+func TestSettings_DirEditSwallowsGlobalKeys(t *testing.T) {
+	m := settingsModel(t, t.TempDir())
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.dirInput = ""
+
+	// q would quit and left/right would switch tabs outside the editor.
+	for _, r := range []rune{'q', 'x'} {
+		m = send(m, keyRune(r))
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyLeft})
+
+	if !m.editingDir {
+		t.Fatal("editing stopped on a key that should have been typed")
+	}
+	if m.tab != tabSettings {
+		t.Errorf("tab changed to %d while editing", m.tab)
+	}
+	if m.dirInput != "qx" {
+		t.Errorf("dirInput = %q, want %q", m.dirInput, "qx")
+	}
+}
+
+func TestSettings_DirEditBackspaceAndEsc(t *testing.T) {
+	dir := t.TempDir()
+	m := settingsModel(t, dir)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.dirInput = "ab"
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyBackspace})
+	if m.dirInput != "a" {
+		t.Errorf("dirInput = %q, want %q after backspace", m.dirInput, "a")
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.editingDir {
+		t.Error("Esc should leave the editor")
+	}
+	if claudeDir != dir {
+		t.Errorf("claudeDir = %q, want it unchanged (%q) after Esc", claudeDir, dir)
+	}
+	if m.cfg.ClaudeDir != dir {
+		t.Errorf("cfg.ClaudeDir = %q, want it unchanged after Esc", m.cfg.ClaudeDir)
+	}
+}
+
+func TestSettings_DirEditEnterApplies(t *testing.T) {
+	oldDir := t.TempDir()
+	newDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(newDir, "projects"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := settingsModel(t, oldDir)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.dirInput = newDir
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.editingDir {
+		t.Error("Enter should leave the editor")
+	}
+	if claudeDir != newDir {
+		t.Errorf("claudeDir = %q, want %q", claudeDir, newDir)
+	}
+	if projectsDir != filepath.Join(newDir, "projects") {
+		t.Errorf("projectsDir = %q, want it derived from the new directory", projectsDir)
+	}
+	if m.cfg.ClaudeDir != newDir {
+		t.Errorf("cfg.ClaudeDir = %q, want %q", m.cfg.ClaudeDir, newDir)
+	}
+}
+
+func TestSettings_DirEditEnterOnEmptyInputKeepsDir(t *testing.T) {
+	dir := t.TempDir()
+	m := settingsModel(t, dir)
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.dirInput = "   "
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.editingDir {
+		t.Error("Enter should leave the editor")
+	}
+	if claudeDir != dir {
+		t.Errorf("claudeDir = %q, want it unchanged (%q) on empty input", claudeDir, dir)
+	}
+}
+
+func TestSettings_DirEditCtrlCQuits(t *testing.T) {
+	m := settingsModel(t, t.TempDir())
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c while editing should quit, got no command")
+	}
+	if msg := cmd(); msg == nil {
+		t.Fatal("ctrl+c produced a command that yields no message")
+	} else if _, ok := msg.(tea.QuitMsg); !ok {
+		t.Errorf("ctrl+c produced %T, want tea.QuitMsg", msg)
+	}
+	_ = next
+}
+
+func TestSettings_DirEditEnterPersistsToDisk(t *testing.T) {
+	newDir := t.TempDir()
+	m := settingsModel(t, t.TempDir())
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.dirInput = newDir
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("config was not written: %v", err)
+	}
+	var saved Config
+	if err := json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("config is not valid JSON: %v", err)
+	}
+	if saved.ClaudeDir != newDir {
+		t.Errorf("persisted ClaudeDir = %q, want %q", saved.ClaudeDir, newDir)
 	}
 }

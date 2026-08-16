@@ -21,35 +21,52 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Load or create config
+	// Load config; a missing one means this is the first run
 	config, err := loadConfig()
 	if err != nil {
-		// First run - prompt for directory
-		dir, err := promptForClaudeDir()
-		if err != nil {
-			fmt.Printf("Error reading input: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Validate directory exists
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			fmt.Printf("Error: Directory does not exist: %s\n", dir)
-			fmt.Println("Please create the directory or specify a different path.")
-			os.Exit(1)
-		}
-
-		// Save config with defaults
 		config = &Config{
-			ClaudeDir:              dir,
 			AutoUpdates:            true, // Enable by default
 			UpdateCheckIntervalHrs: 1,    // Check every hour
 			LastUpdateCheck:        0,
 		}
+	}
+
+	// Reconcile the saved Claude directory with the one the environment points
+	// at. Decisions taken without asking apply to this run only and are never
+	// written back to the config.
+	claudeDirForRun := config.ClaudeDir
+	decision := resolveClaudeDir(config.ClaudeDir, systemClaudeDir(), isInteractive())
+	switch decision.action {
+	case dirAskFirstRun:
+		dir, err := promptForClaudeDir(decision.dir)
+		if err != nil {
+			fmt.Printf("Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		claudeDirForRun = dir
+		config.ClaudeDir = dir
 		if err := saveConfig(config); err != nil {
 			fmt.Printf("Warning: Could not save config: %v\n", err)
 		} else {
 			fmt.Printf("\n✓ Configuration saved to: %s\n\n", configPath)
 		}
+
+	case dirAskSwitch:
+		switchDir, err := promptToSwitchClaudeDir(config.ClaudeDir, decision.dir)
+		if err != nil {
+			fmt.Printf("Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		if switchDir {
+			claudeDirForRun = decision.dir
+			config.ClaudeDir = decision.dir
+			if err := saveConfig(config); err != nil {
+				fmt.Printf("Warning: Could not save config: %v\n", err)
+			}
+		}
+
+	case dirUseSystem:
+		claudeDirForRun = decision.dir
 	}
 
 	// Set defaults for existing configs without update settings
@@ -58,8 +75,11 @@ func main() {
 		config.AutoUpdates = true
 	}
 
-	// Initialize paths from config
-	initializePaths(config.ClaudeDir)
+	// TODO: a Claude directory that is missing or empty - the default, a
+	// CLAUDE_CONFIG_DIR path, or one typed at first run - currently just yields
+	// an empty chat list. Decide how to report that instead of looking like a
+	// history with no sessions.
+	initializePaths(claudeDirForRun)
 
 	// Manual update check
 	if *updateFlag {

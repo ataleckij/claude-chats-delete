@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	CurrentVersion = "0.3.9"
+	CurrentVersion = "0.3.10"
 	GitHubAPIURL   = "https://api.github.com/repos/ataleckij/claude-chats-delete/releases/latest"
 
 	// Network timeouts. The checksums file is a few hundred bytes; the binary is
