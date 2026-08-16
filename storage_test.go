@@ -398,6 +398,12 @@ func TestGetChatVersion(t *testing.T) {
 
 // setupStorageDirs creates a temp ~/.claude-like structure and wires global path vars.
 // All globals are restored automatically when the test ends.
+// chatIn builds the Chat value findRelatedFiles expects for a session whose
+// transcript lives in projDir.
+func chatIn(projDir, uuid string) Chat {
+	return Chat{UUID: uuid, Path: filepath.Join(projDir, uuid+".jsonl")}
+}
+
 func setupStorageDirs(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -500,7 +506,7 @@ func TestFindRelatedFiles(t *testing.T) {
 		}
 	}
 
-	got := findRelatedFiles(uuid)
+	got := findRelatedFiles(chatIn(projDir, uuid))
 	found := make(map[string]bool)
 	for _, f := range got {
 		found[f] = true
@@ -551,7 +557,7 @@ func TestFindRelatedFiles_CurrentLayout(t *testing.T) {
 	}
 
 	found := make(map[string]bool)
-	for _, f := range findRelatedFiles(uuid) {
+	for _, f := range findRelatedFiles(chatIn(projDir, uuid)) {
 		found[f] = true
 	}
 
@@ -622,7 +628,7 @@ func TestFindRelatedFiles_JobState(t *testing.T) {
 	}
 
 	found := make(map[string]bool)
-	for _, f := range findRelatedFiles(uuid) {
+	for _, f := range findRelatedFiles(chatIn(projDir, uuid)) {
 		found[f] = true
 	}
 
@@ -742,7 +748,7 @@ func TestFindRelatedFiles_TruncatedScanKeepsUncertainArtifacts(t *testing.T) {
 
 	// Sanity check: with a full scan both artifacts are found.
 	found := make(map[string]bool)
-	for _, f := range findRelatedFiles(uuid) {
+	for _, f := range findRelatedFiles(chatIn(projDir, uuid)) {
 		found[f] = true
 	}
 	if !found[planFile] || !found[agentMemory] {
@@ -755,7 +761,7 @@ func TestFindRelatedFiles_TruncatedScanKeepsUncertainArtifacts(t *testing.T) {
 	defer func() { jsonlScanTokenMax = orig }()
 
 	found = make(map[string]bool)
-	for _, f := range findRelatedFiles(uuid) {
+	for _, f := range findRelatedFiles(chatIn(projDir, uuid)) {
 		found[f] = true
 	}
 	if found[planFile] {
@@ -767,6 +773,39 @@ func TestFindRelatedFiles_TruncatedScanKeepsUncertainArtifacts(t *testing.T) {
 	// The transcript itself is still identified by filename, so it stays covered.
 	if !found[jsonlPath] {
 		t.Errorf("transcript missing from the deletion set: %s", jsonlPath)
+	}
+}
+
+// The transcript is taken from the chat's own path rather than found by uuid
+// across projects. A second project is needed to catch a regression back to a
+// glob, which a single-project fixture cannot detect. Note this only scopes the
+// transcript: uuid-keyed state is one shared directory and has no owner to
+// distinguish.
+func TestFindRelatedFiles_TranscriptIsProjectScoped(t *testing.T) {
+	setupStorageDirs(t)
+
+	uuid := "deadbeef-1234-5678-abcd-000000000005"
+	mine := filepath.Join(projectsDir, "mine")
+	theirs := filepath.Join(projectsDir, "theirs")
+	for _, d := range []string{mine, theirs} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, uuid+".jsonl"), []byte("{}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	found := make(map[string]bool)
+	for _, f := range findRelatedFiles(chatIn(mine, uuid)) {
+		found[f] = true
+	}
+
+	if !found[filepath.Join(mine, uuid+".jsonl")] {
+		t.Errorf("selected chat's transcript missing from the deletion set")
+	}
+	if found[filepath.Join(theirs, uuid+".jsonl")] {
+		t.Errorf("transcript resolved by uuid across projects instead of from chat.Path")
 	}
 }
 
@@ -783,8 +822,8 @@ func TestFindRelatedFiles_EmptyUUID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := findRelatedFiles(""); len(got) != 0 {
-		t.Errorf("findRelatedFiles(\"\") returned %v, want nothing", got)
+	if got := findRelatedFiles(Chat{}); len(got) != 0 {
+		t.Errorf("findRelatedFiles on a zero Chat returned %v, want nothing", got)
 	}
 }
 
@@ -814,7 +853,7 @@ func TestFindRelatedFiles_PlanSharedSlugNotDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := findRelatedFiles(uuid1)
+	got := findRelatedFiles(chatIn(projDir, uuid1))
 	for _, f := range got {
 		if f == planFile {
 			t.Fatalf("shared plan file must not be deleted while another chat uses same slug: %s", planFile)
@@ -859,7 +898,7 @@ func TestFindRelatedFiles_AgentMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := findRelatedFiles(uuid)
+	got := findRelatedFiles(chatIn(projDir, uuid))
 	found := make(map[string]bool)
 	for _, f := range got {
 		found[f] = true

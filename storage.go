@@ -375,7 +375,22 @@ func updateSessionsIndex(uuid string) error {
 	return nil
 }
 
-func findRelatedFiles(uuid string) []string {
+// findRelatedFiles returns everything on disk that belongs to a chat. The
+// transcript comes from chat.Path; the other artifacts live in flat directories
+// keyed by uuid alone, so no project scoping applies to them.
+//
+// TODO: a uuid shared by two transcripts is not expected from a healthy Claude
+// Code install, only from hand-copied histories, a restored backup, or a path
+// collision (see the v2.1.224 fix). Scanning projects/*/<uuid>.jsonl would let
+// us report that rather than leave it invisible.
+//
+// TODO: state whose transcript is already gone is never reached: the chat list
+// is built from transcripts, so orphaned sidecars stay invisible. Surfacing them
+// would need its own scan over the uuid-keyed directories plus a separate UI for
+// reviewing and removing them - shape still open, and whether it is worth it.
+func findRelatedFiles(chat Chat) []string {
+	uuid := chat.UUID
+
 	// Guard against an empty uuid: the lookups below build paths and globs from
 	// it, and an empty one would match unrelated sessions' state.
 	if uuid == "" {
@@ -385,23 +400,20 @@ func findRelatedFiles(uuid string) []string {
 	var files []string
 	var chatJSONLPath string
 
-	// Main JSONL file and subagents directory
-	matches, _ := filepath.Glob(filepath.Join(projectsDir, "*", uuid+".jsonl"))
-	for _, m := range matches {
-		files = append(files, m)
-		chatJSONLPath = m // Save for slug extraction
-
-		// Subagents directory (same name as jsonl but without extension)
-		subagentsDir := strings.TrimSuffix(m, ".jsonl")
-		if _, err := os.Stat(subagentsDir); err == nil {
-			files = append(files, subagentsDir)
+	// Transcript and its chat directory, scoped to the selected project. A
+	// missing transcript is not fatal: the sidecar state below may still exist
+	// and should be cleaned up.
+	if chat.Path != "" {
+		if _, err := os.Stat(chat.Path); err == nil {
+			files = append(files, chat.Path)
+			chatJSONLPath = chat.Path // Save for slug extraction
 		}
 
-		// Tool results directory (within chat directory)
-		chatDir := strings.TrimSuffix(m, ".jsonl")
-		toolResultsDir := filepath.Join(chatDir, "tool-results")
-		if _, err := os.Stat(toolResultsDir); err == nil {
-			files = append(files, toolResultsDir)
+		// Chat directory (same name as the jsonl, without the extension), which
+		// holds subagents/ and tool-results/.
+		chatDir := strings.TrimSuffix(chat.Path, ".jsonl")
+		if _, err := os.Stat(chatDir); err == nil {
+			files = append(files, chatDir)
 		}
 	}
 
@@ -599,7 +611,7 @@ func parseAgentIDs(chatFile string) (ids []string, ok bool) {
 func deleteChats(chats []Chat) (int, error) {
 	count := 0
 	for _, chat := range chats {
-		files := findRelatedFiles(chat.UUID)
+		files := findRelatedFiles(chat)
 		for _, file := range files {
 			if err := os.RemoveAll(file); err != nil {
 				return 0, fmt.Errorf("failed to delete %s: %w", file, err)
