@@ -1,5 +1,3 @@
-
-
 # Claude Code Chats Delete TUI
 
 ## 1. Overview
