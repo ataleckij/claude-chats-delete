@@ -124,6 +124,23 @@ type model struct {
 	editingDir bool
 	dirInput   string
 
+	// Claude Code's retention period, read from its settings file rather than
+	// ours. Cached so the view does not touch the disk on every frame;
+	// cleanupSet is false when the key is absent and Claude Code's own default
+	// applies.
+	cleanupDays int
+	cleanupSet  bool
+
+	// Retention editing. While editingCleanup is set, arrows move cleanupDraft
+	// through the presets and nothing is written until Enter; cleanupBase is the
+	// value the edit started from, so a change made elsewhere in the meantime
+	// can be detected. cleanupConflict holds that competing value while the
+	// overwrite is being confirmed.
+	editingCleanup  bool
+	cleanupDraft    int
+	cleanupBase     cleanupState
+	cleanupConflict *cleanupState
+
 	// Grouped view state
 	grouped          bool
 	expandedProjects map[string]bool
@@ -175,6 +192,58 @@ func (m *model) rebuildGroupRows() {
 		}
 	}
 	m.groupRows = rows
+}
+
+// formatDays renders a day count without the "1 days" wording.
+func formatDays(days int) string {
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
+}
+
+// loadCleanupPeriod refreshes the cached retention value from Claude Code's
+// settings. It is called when the settings tab is opened, never from the view,
+// so rendering stays free of disk access.
+func (m *model) loadCleanupPeriod() {
+	if m.tab != tabSettings {
+		return
+	}
+	days, set, err := readCleanupPeriod()
+	if err != nil {
+		m.error = err.Error()
+	}
+	m.cleanupDays, m.cleanupSet = days, set
+}
+
+// applyCleanupDraft writes the drafted retention value. The first Enter refuses
+// to overwrite a value that changed on disk since editing began and shows what
+// it found; a second Enter confirms the overwrite.
+func (m *model) applyCleanupDraft() {
+	expect := &m.cleanupBase
+	if m.cleanupConflict != nil {
+		expect = nil // the user has seen the competing value and chose to proceed
+	}
+
+	err := writeCleanupPeriod(m.cleanupDraft, expect)
+	if conflict, ok := err.(*cleanupConflictError); ok {
+		current := conflict.current
+		m.cleanupConflict = &current
+		m.cleanupDays, m.cleanupSet = current.days, current.set
+		m.error = ""
+		return
+	}
+	if err != nil {
+		m.error = err.Error()
+		m.editingCleanup = false
+		m.cleanupConflict = nil
+		return
+	}
+
+	m.cleanupDays, m.cleanupSet = m.cleanupDraft, true
+	m.editingCleanup = false
+	m.cleanupConflict = nil
+	m.error = ""
 }
 
 // chatIndicesForProject returns all chat indices belonging to a project.
@@ -257,6 +326,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// The retention editor also runs before the global bindings: arrows step
+		// through the presets and nothing reaches the disk until Enter.
+		if m.editingCleanup {
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyEsc:
+				m.editingCleanup = false
+				m.cleanupConflict = nil
+				m.error = ""
+			case tea.KeyLeft, tea.KeyUp:
+				if m.cleanupConflict == nil {
+					m.cleanupDraft = prevCleanupPeriod(m.cleanupDraft)
+				}
+			case tea.KeyRight, tea.KeyDown:
+				if m.cleanupConflict == nil {
+					m.cleanupDraft = nextCleanupPeriod(m.cleanupDraft)
+				}
+			case tea.KeyEnter:
+				m.applyCleanupDraft()
+			}
+			return m, nil
+		}
+
 		// The directory editor takes every key before the global bindings, so a
 		// typed q or arrow key edits the path instead of quitting or switching
 		// tabs.
@@ -278,6 +371,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// selection and its auto-select flag, expanded projects,
 					// and the viewport position.
 					m.chats = findAllChats()
+					m.loadCleanupPeriod()
 					m.selected = make(map[int]bool)
 					m.autoSelected = false
 					m.expandedProjects = make(map[string]bool)
@@ -306,11 +400,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left":
 			if m.tab > 0 {
 				m.tab--
+				m.loadCleanupPeriod()
 			}
 			return m, nil
 		case "right":
 			if m.tab < len(tabs)-1 {
 				m.tab++
+				m.loadCleanupPeriod()
 			}
 			return m, nil
 		}
@@ -330,6 +426,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.settingsCursor == settingClaudeDir {
 					m.editingDir = true
 					m.dirInput = claudeDir
+					return m, nil
+				}
+				if m.settingsCursor == settingCleanupPeriod {
+					m.editingCleanup = true
+					m.cleanupDraft = m.cleanupDays
+					m.cleanupBase = cleanupState{days: m.cleanupDays, set: m.cleanupSet}
+					m.cleanupConflict = nil
+					m.error = ""
 					return m, nil
 				}
 				if m.cfg != nil {
@@ -539,7 +643,8 @@ const (
 	settingAutoUpdates    = 0
 	settingGroupByProject = 1
 	settingClaudeDir      = 2
-	settingsCount         = 3
+	settingCleanupPeriod  = 3
+	settingsCount         = 4
 )
 
 func (m model) viewSettings() string {
@@ -608,11 +713,64 @@ func (m model) viewSettings() string {
 		s.WriteString("\n")
 	}
 
+	// Claude Code's own settings, edited in its settings.json rather than ours
+	s.WriteString("\n")
+	s.WriteString(dimStyle.Render("  Claude Code"))
+	s.WriteString("\n")
+
+	cleanupVal := formatDays(m.cleanupDays)
+	if !m.cleanupSet {
+		cleanupVal += " (default)"
+	}
+	if m.editingCleanup {
+		// Unsaved: show the draft with an arrow so it cannot be mistaken for
+		// what is on disk.
+		cleanupVal = "-> " + formatDays(m.cleanupDraft)
+	}
+	cleanupLine := fmt.Sprintf("  Delete chats after  %s", cleanupVal)
+	switch {
+	case m.editingCleanup:
+		s.WriteString(selectedStyle.Render(cleanupLine))
+	case m.settingsCursor == settingCleanupPeriod:
+		s.WriteString(cursorStyle.Render(cleanupLine))
+	default:
+		s.WriteString(cleanupLine)
+	}
+	s.WriteString("\n")
+	switch {
+	case m.cleanupConflict != nil:
+		found := formatDays(m.cleanupConflict.days)
+		if !m.cleanupConflict.set {
+			found = "no value"
+		}
+		s.WriteString(errorStyle.Render(fmt.Sprintf("                      Changed to %s elsewhere. Set %s anyway?",
+			found, formatDays(m.cleanupDraft))))
+		s.WriteString("\n")
+	case m.editingCleanup:
+		s.WriteString(dimStyle.Render("                      Not saved yet"))
+		s.WriteString("\n")
+	default:
+		s.WriteString(dimStyle.Render("                      Claude Code deletes its own session files after this"))
+		s.WriteString("\n")
+		s.WriteString(dimStyle.Render("                      period; a project settings file may override it"))
+		s.WriteString("\n")
+	}
+
 	s.WriteString("\n")
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
+	// Failures here come from Claude Code's settings file (a malformed file, a
+	// refused write); without this the editor would just close silently.
+	if m.error != "" {
+		s.WriteString(errorStyle.Render("Error: " + m.error))
+		s.WriteString("\n")
+	}
 	if m.editingDir {
 		s.WriteString(helpStyle.Render("Type a path | Enter:Save | Esc:Cancel"))
+	} else if m.cleanupConflict != nil {
+		s.WriteString(helpStyle.Render("Enter:Overwrite | Esc:Cancel"))
+	} else if m.editingCleanup {
+		s.WriteString(helpStyle.Render("←/→:Change | Enter:Save | Esc:Cancel"))
 	} else {
 		s.WriteString(helpStyle.Render("↑/↓:Navigate | Enter:Toggle/Edit | ←/→:Switch tabs | q:Quit"))
 	}

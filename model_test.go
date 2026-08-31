@@ -825,3 +825,179 @@ func TestSettings_DirEditEnterPersistsToDisk(t *testing.T) {
 		t.Errorf("persisted ClaudeDir = %q, want %q", saved.ClaudeDir, newDir)
 	}
 }
+
+// settingsModelWithClaudeSettings puts the cursor on the retention row and
+// points the tool at a scratch Claude directory holding the given settings.
+func settingsModelWithClaudeSettings(t *testing.T, settings string) model {
+	t.Helper()
+	dir := t.TempDir()
+	if settings != "" {
+		if err := os.WriteFile(filepath.Join(dir, claudeSettingsFile), []byte(settings), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := settingsModel(t, dir)
+	m.settingsCursor = settingCleanupPeriod
+	m.loadCleanupPeriod()
+	return m
+}
+
+func TestSettings_CleanupPeriodLoadsFromClaudeSettings(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"cleanupPeriodDays": 90}`)
+
+	if !m.cleanupSet || m.cleanupDays != 90 {
+		t.Errorf("loaded days=%d set=%v, want 90/true", m.cleanupDays, m.cleanupSet)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "90 days") {
+		t.Errorf("view does not show the configured period:\n%s", view)
+	}
+}
+
+func TestSettings_CleanupPeriodShowsDefaultWhenUnset(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"model": "opus"}`)
+
+	if m.cleanupSet {
+		t.Error("cleanupSet should be false when the key is absent")
+	}
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "30 days (default)") {
+		t.Errorf("view does not mark the value as a default:\n%s", view)
+	}
+}
+
+// Stepping through presets must stay in memory: the file is written once, when
+// the edit is confirmed.
+func TestSettings_CleanupPeriodWritesOnlyOnConfirm(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"cleanupPeriodDays": 30}`)
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // open the editor
+	if !m.editingCleanup {
+		t.Fatal("Enter should start editing")
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.cleanupDraft != 90 {
+		t.Fatalf("draft = %d, want 90 after two steps", m.cleanupDraft)
+	}
+	if days, _, _ := readCleanupPeriod(); days != 30 {
+		t.Fatalf("file changed to %d while still editing, want it untouched at 30", days)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // confirm
+	if m.editingCleanup {
+		t.Error("Enter should close the editor")
+	}
+	days, set, err := readCleanupPeriod()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set || days != 90 {
+		t.Errorf("persisted days=%d set=%v, want 90/true", days, set)
+	}
+	if m.cleanupDays != 90 {
+		t.Errorf("cached days = %d, want 90", m.cleanupDays)
+	}
+}
+
+func TestSettings_CleanupPeriodEscapeDiscardsDraft(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"cleanupPeriodDays": 30}`)
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRight})
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})
+
+	if m.editingCleanup {
+		t.Error("Esc should close the editor")
+	}
+	if m.cleanupDays != 30 {
+		t.Errorf("cached days = %d, want the original 30", m.cleanupDays)
+	}
+	if days, _, _ := readCleanupPeriod(); days != 30 {
+		t.Errorf("file = %d, want it untouched at 30", days)
+	}
+}
+
+// A value changed elsewhere during the edit is reported instead of being
+// overwritten; a second Enter goes through with it.
+func TestSettings_CleanupPeriodConflictNeedsSecondConfirm(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"cleanupPeriodDays": 30}`)
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRight}) // draft 60
+
+	// Someone else edits the file while our editor is open.
+	if err := writeCleanupPeriod(180, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.cleanupConflict == nil {
+		t.Fatal("expected the competing value to be reported")
+	}
+	if m.cleanupConflict.days != 180 {
+		t.Errorf("conflict shows %d, want 180", m.cleanupConflict.days)
+	}
+	if !m.editingCleanup {
+		t.Error("the editor should stay open awaiting confirmation")
+	}
+	if days, _, _ := readCleanupPeriod(); days != 180 {
+		t.Errorf("file = %d, want the competing value still intact", days)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "anyway?") {
+		t.Errorf("view does not warn about the change:\n%s", view)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // confirm the overwrite
+	if m.editingCleanup || m.cleanupConflict != nil {
+		t.Error("confirming should close the editor")
+	}
+	if days, _, _ := readCleanupPeriod(); days != 60 {
+		t.Errorf("file = %d, want our 60 after the confirmed overwrite", days)
+	}
+}
+
+func TestSettings_CleanupPeriodConflictCanBeCancelled(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"cleanupPeriodDays": 30}`)
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = send(m, tea.KeyMsg{Type: tea.KeyRight})
+	if err := writeCleanupPeriod(180, nil); err != nil {
+		t.Fatal(err)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // conflict
+	m = send(m, tea.KeyMsg{Type: tea.KeyEsc})   // back off
+
+	if m.editingCleanup || m.cleanupConflict != nil {
+		t.Error("Esc should close the editor and clear the conflict")
+	}
+	if days, _, _ := readCleanupPeriod(); days != 180 {
+		t.Errorf("file = %d, want the competing value kept", days)
+	}
+}
+
+func TestSettings_CleanupPeriodReportsWriteFailure(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"model": "opus"`) // unparsable
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // open
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // try to save
+	if m.error == "" {
+		t.Error("a failed write should surface an error")
+	}
+}
+
+// The settings tab must show what went wrong: its failures come from Claude
+// Code's settings file, and closing the editor silently would hide them.
+func TestSettings_ShowsErrorInView(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"model": "opus"`) // unparsable
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // open the editor
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter}) // attempt the write
+
+	if m.error == "" {
+		t.Fatal("a failed write should set an error")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Error:") {
+		t.Errorf("settings view does not show the error:\n%s", view)
+	}
+}
