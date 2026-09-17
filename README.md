@@ -8,7 +8,7 @@
 
 Browse, select, and bulk delete chat histories stored in `~/.claude` directory.
 
-Tested with Claude Code **v2.1.233**.
+Tested with Claude Code **v2.1.274**.
 
 **Chats view**
 
@@ -23,6 +23,8 @@ Tested with Claude Code **v2.1.233**.
 - Browse chat sessions across all projects, with optional grouped-by-project view
 - Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, tasks, background job state, security and telemetry leftovers, and more)
 - Copy chat UUID to clipboard
+- Point the tool at any Claude directory, honoring `CLAUDE_CONFIG_DIR`
+- View and change how long Claude Code keeps its own sessions (`cleanupPeriodDays`)
 - Keyboard-driven interface with vim keys and fast page navigation
 - Auto-update via GitHub releases
 
@@ -97,7 +99,29 @@ To disable auto-updates without opening the TUI, set `CLAUDE_CHATS_DISABLE_AUTOU
 
 ## 7. Configuration
 
-On first run, you'll be prompted to specify your Claude directory. Configuration is saved to `~/.config/claude-chats/config.json`.
+The tool's own settings live in `~/.config/claude-chats/config.json`.
+
+### Claude directory
+
+On first run you are asked which Claude directory to work on; the answer is
+saved. If `CLAUDE_CONFIG_DIR` is set to a different path on a later run, the
+tool asks which of the two to use, and a choice made this way is never written
+to the config file. When the session is not interactive, `CLAUDE_CONFIG_DIR`
+wins without a prompt.
+
+The directory is shown in the **Settings** tab and can be changed there: press
+`ENTER` on the row, edit the path, then `ENTER` to apply. The chat list reloads
+from the new location.
+
+### Claude Code's retention period
+
+The **Settings** tab also shows `cleanupPeriodDays` from Claude Code's own
+`settings.json`, the period after which it sweeps old sessions and cached data.
+When the key is absent, Claude Code applies a 30-day default and the row says
+so. Press `ENTER` to edit, `←`/`→` to pick a value, `ENTER` to save or `ESC` to
+discard. Only that one key is rewritten: the rest of the file, including key
+order and formatting, is left byte for byte as it was, and if the value changed
+on disk while you were editing, the tool reports it and asks before overwriting.
 
 ## 8. Star History
 

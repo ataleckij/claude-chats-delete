@@ -1,6 +1,6 @@
 # Keyboard Shortcuts Guide
 
-Complete reference for all keyboard shortcuts in Claude Code Chat Manager.
+Complete reference for all keyboard shortcuts in Claude Chats Delete.
 
 ## Navigation Commands
 
@@ -19,6 +19,43 @@ For users with large chat histories (hundreds of sessions):
 ### Jump Navigation
 - **`g`** or **`Home`** - Jump to first chat (top of list)
 - **`G`** or **`End`** - Jump to last chat (bottom of list)
+
+## Tabs
+
+- **`←`** / **`→`** - Switch between the **Chats** and **Settings** tabs
+
+## Grouped View
+
+When chats are grouped by project (toggled in **Settings**):
+
+- **`ENTER`** on a project header - Expand or collapse that project
+- **`<Space>`** on a project header - Select or deselect every chat in it
+- **`d`** on a project header - When nothing is selected, auto-selects every
+  chat in that project and asks to delete them; an existing selection is used
+  as is
+
+## Settings Tab
+
+- **`↑`** / **`↓`** (or **`k`** / **`j`**) - Move between settings
+- **`ENTER`** - Toggle the setting, or open an editor for the rows that hold a
+  value (Claude directory, `cleanupPeriodDays`)
+
+### Editing the Claude directory
+
+- Type to edit the path, **`Backspace`** to correct it
+- **`ENTER`** - Apply and reload the chat list from the new directory
+- **`ESC`** - Cancel
+- **`Ctrl+C`** - Quit the application
+
+### Editing `cleanupPeriodDays`
+
+- **`←`** / **`→`** (or **`↑`** / **`↓`**) - Step through the preset periods;
+  nothing is written to disk while you do this
+- **`ENTER`** - Save to Claude Code's `settings.json`. If the value changed on
+  disk while you were editing, the new value is shown and a second **`ENTER`**
+  confirms the overwrite
+- **`ESC`** - Discard the change
+- **`Ctrl+C`** - Quit the application
 
 ## Selection Commands
 

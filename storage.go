@@ -432,9 +432,10 @@ func findRelatedFiles(chat Chat) []string {
 		}
 	}
 
-	// Failed telemetry events, named 1p_failed_events.<session-uuid>.<id>.json.
-	// The uuid must be a whole dot-separated component: a bare substring match
-	// would also hit files that merely carry it as their trailing id.
+	// Failed telemetry events, named 1p_failed_events.<session-uuid>.<id>.json,
+	// written only when an event could not be delivered. The uuid must be a
+	// whole dot-separated component: a bare substring match would also hit
+	// files that merely carry it as their trailing id.
 	telemetryMatches, _ := filepath.Glob(filepath.Join(telemetryDir, "*."+uuid+".*.json"))
 	files = append(files, telemetryMatches...)
 
@@ -446,7 +447,8 @@ func findRelatedFiles(chat Chat) []string {
 		files = append(files, sessionPath)
 	}
 
-	// Task state directory
+	// Task state, written only by sessions whose model offers the task tools
+	// (older models, or CLAUDE_CODE_ENABLE_TODO_TOOLS=1 on current ones).
 	tasksPath := filepath.Join(tasksDir, uuid)
 	if _, err := os.Stat(tasksPath); err == nil {
 		files = append(files, tasksPath)

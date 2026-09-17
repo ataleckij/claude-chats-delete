@@ -727,7 +727,7 @@ func (m model) viewSettings() string {
 		// what is on disk.
 		cleanupVal = "-> " + formatDays(m.cleanupDraft)
 	}
-	cleanupLine := fmt.Sprintf("  Delete chats after  %s", cleanupVal)
+	cleanupLine := fmt.Sprintf("  %s  %s", cleanupPeriodKey, cleanupVal)
 	switch {
 	case m.editingCleanup:
 		s.WriteString(selectedStyle.Render(cleanupLine))
@@ -743,16 +743,19 @@ func (m model) viewSettings() string {
 		if !m.cleanupConflict.set {
 			found = "no value"
 		}
-		s.WriteString(errorStyle.Render(fmt.Sprintf("                      Changed to %s elsewhere. Set %s anyway?",
+		s.WriteString(errorStyle.Render(fmt.Sprintf("                     Changed to %s elsewhere. Set %s anyway?",
 			found, formatDays(m.cleanupDraft))))
 		s.WriteString("\n")
 	case m.editingCleanup:
-		s.WriteString(dimStyle.Render("                      Not saved yet"))
+		s.WriteString(dimStyle.Render("                     Not saved yet"))
 		s.WriteString("\n")
 	default:
-		s.WriteString(dimStyle.Render("                      Claude Code deletes its own session files after this"))
+		s.WriteString(dimStyle.Render("                     Claude Code's own retention sweep: old sessions, and"))
 		s.WriteString("\n")
-		s.WriteString(dimStyle.Render("                      period; a project settings file may override it"))
+		s.WriteString(dimStyle.Render("                     cached data such as synced skills and stale temp files"))
+		s.WriteString("\n")
+		s.WriteString(dimStyle.Render(fmt.Sprintf("                     Absent from %s, the default is %s",
+			claudeSettingsFile, formatDays(defaultCleanupPeriod))))
 		s.WriteString("\n")
 	}
 
