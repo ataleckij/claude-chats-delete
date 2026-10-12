@@ -124,14 +124,25 @@ var (
 	agentsDir string
 )
 
-// Directories under ~/.claude surveyed on v2.1.220, with their cleanup status:
+// Entries under ~/.claude surveyed on v2.1.296, with their cleanup status:
+//   - history.jsonl  prompt history shared by every session, one record per
+//                  prompt, tagged with sessionId. A deleted chat's records are
+//                  dropped by pruneHistory; the file itself stays.
+//   - paste-cache/ pastes too large to inline into history.jsonl, named after
+//                  a content hash and referenced only from there. Removed by
+//                  pruneHistory once no remaining record points at them.
 //   - sessions/    runtime registry of live sessions, keyed by PID (holds
-//                  sessionId, status). Owned by the running process, not the
-//                  history: not deleted per chat.
+//                  sessionId, status, plus a <pid>.<hash>.key file). Owned by
+//                  the running process, not the history: not deleted per chat.
 //   - daemon/      supervisor state (roster.json lists live workers, control
 //                  key, dispatch dir). Session ids appear only while a worker
 //                  runs: runtime state, not deleted per chat.
 //   - agent-memory/<agent>/  per-agent memory, project-scoped: preserved.
+//   - projects/<project>/memory/  project memory notes: preserved.
+//   - shell-snapshots/  shell environment snapshots named after a timestamp,
+//                  not a session: not deleted per chat.
+//   - seed-admin/  staging area for /ultrareview uploads; empty when surveyed,
+//                  no session key seen: not deleted per chat.
 //   - worktrees/, workflows/  absent at user level; worktrees live in a
 //                  project's own .claude/, so they are out of scope here.
 //   - jobs/        background-session state, covered by findRelatedFiles.

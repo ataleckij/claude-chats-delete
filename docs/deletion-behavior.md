@@ -39,6 +39,34 @@ For each chat UUID, the tool removes:
   `jobs/<fork-prefix>/tmp/parent-transcript.jsonl` (the fork's own transcript is
   self-contained and is left alone)
 
+### Prompt History
+
+Claude Code keeps every prompt you type in `history.jsonl`, one file shared by
+all sessions, where each record carries the `sessionId` it was typed in. Deleting
+a chat removes that chat's records from the file. Every other line, including
+ones that do not parse, is carried over byte for byte.
+
+Pastes too large to be stored inside a record live in `paste-cache/<hash>.txt`
+and are referenced from the record by that hash. Such a file is removed only
+when no remaining record in `history.jsonl` points at it, so a paste used in
+another chat survives.
+
+Running Claude Code sessions append to `history.jsonl` at any time. The tool
+takes the same lock Claude Code uses for its own writes (a `history.jsonl.lock`
+directory next to the file, as seen on v2.1.296), so a running session waits
+and appends its prompt afterwards. The file is rewritten through a temporary
+file and a rename. If the lock stays held by another process, or the file keeps
+changing anyway, the history is left as it was. A symlinked `history.jsonl` is
+written through to its target.
+
+Records are matched by session id alone, so they are removed only once no
+transcript with that id is left in any project. Two transcripts sharing an id
+(a restored backup, a hand-copied project) keep their prompts until the last
+one is deleted.
+
+When the history cannot be cleaned up, the chat is deleted anyway and the tool
+reports that the prompt history was left behind.
+
 ### Older Layouts
 
 These paths are no longer created by current Claude Code versions (verified
@@ -90,6 +118,8 @@ The files above live in `~/.claude/`:
 │   ├── timeline.jsonl
 │   └── tmp/parent-transcript.jsonl  # a fork's copy of its parent transcript
 ├── jobs/pins.json                # global, never removed
+├── history.jsonl                 # prompt history (the chat's records removed)
+├── paste-cache/<hash>.txt        # large pastes (removed when unreferenced)
 ├── agent-memory/<agent>/         # per-agent memory (preserved)
 ├── sessions/<pid>.json           # live-session registry (preserved)
 ├── daemon/roster.json            # live background workers (preserved)

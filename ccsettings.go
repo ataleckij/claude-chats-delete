@@ -329,25 +329,39 @@ func verifyOnlyKeyChanged(original, updated []byte, key string, value int) error
 	return nil
 }
 
+// resolveSymlink returns the file a path ultimately points at. A path that is
+// not a link, does not exist yet, or cannot be resolved is returned as is.
+func resolveSymlink(path string) string {
+	if target, err := filepath.EvalSymlinks(path); err == nil {
+		return target
+	}
+	return path
+}
+
 // writeFileAtomic writes data through a temp file in the same directory, so a
-// crash cannot leave the settings half-written.
-//
-// TODO: the rename replaces a symlinked settings.json with a regular file
-// instead of writing through the link. Resolve the link first if users turn up
-// keeping this file in a dotfiles setup.
+// crash cannot leave the file half-written. A symlinked path is written through
+// to its target, so the link itself survives.
 func writeFileAtomic(path string, data []byte) error {
+	path = resolveSymlink(path)
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	tmp, err := os.CreateTemp(dir, ".settings-*.json")
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
 
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	// Flushed before the rename: otherwise a power loss could leave the new
+	// name pointing at data that never reached the disk.
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
 		return err

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -951,5 +952,42 @@ func TestUpdateSessionsIndex(t *testing.T) {
 	}
 	if !strings.Contains(content, keepUUID) {
 		t.Errorf("sessions-index lost the kept UUID %q", keepUUID)
+	}
+}
+
+func TestFindRelatedFiles_PatternCharsInPath(t *testing.T) {
+	tmp := setupStorageDirs(t)
+	// Legal in a directory name, wildcards in a glob. setupStorageDirs
+	// restores both variables on cleanup.
+	telemetryDir = filepath.Join(tmp, "cl[au]de*?", "telemetry")
+	todosDir = filepath.Join(tmp, "cl[au]de*?", "todos")
+
+	uuid := "11111111-1111-1111-1111-111111111111"
+	touch := func(dir, name string) string {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("{}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	want := []string{
+		touch(telemetryDir, "1p_failed_events."+uuid+".abc.json"),
+		touch(todosDir, uuid+"-agent-"+uuid+".json"),
+	}
+	// Same directories, names that only resemble this session's files.
+	touch(telemetryDir, "1p_failed_events.other."+uuid+".json")
+	touch(telemetryDir, "1p_failed_events."+uuid+".abc.txt")
+	touch(todosDir, "x"+uuid+".json")
+
+	got := findRelatedFiles(Chat{UUID: uuid})
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("findRelatedFiles =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }

@@ -21,7 +21,7 @@ Tested with Claude Code **v2.1.274**.
 ## 2. Features
 
 - Browse chat sessions across all projects, with optional grouped-by-project view
-- Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, tasks, background job state, security and telemetry leftovers, and more)
+- Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, tasks, background job state, prompt history, security and telemetry leftovers, and more)
 - Copy chat UUID to clipboard
 - Point the tool at any Claude directory, honoring `CLAUDE_CONFIG_DIR`
 - View and change how long Claude Code keeps its own sessions (`cleanupPeriodDays`)
@@ -44,7 +44,9 @@ Deleting a chat removes its full on-disk footprint, not just the transcript:
 ├── debug/<uuid>.txt                          # debug log
 ├── security/security_warnings_state_<uuid>.* # security-hook dedupe state + lock
 ├── telemetry/*<uuid>*.json                   # failed telemetry events
-└── jobs/<uuid-prefix>/                       # background session state
+├── jobs/<uuid-prefix>/                       # background session state
+├── history.jsonl                             # the chat's prompts removed from the shared history
+└── paste-cache/<hash>.txt                    # large pastes no other chat's prompts refer to
 ```
 
 For a background session that was forked from the chat being deleted, the copy

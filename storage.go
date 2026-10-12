@@ -59,7 +59,7 @@ func findAllChats() []Chat {
 		// }
 
 		// Scan all JSONL files (original behavior)
-		files, err := filepath.Glob(filepath.Join(projectPath, "*"+transcriptExt))
+		files, err := transcriptsIn(projectPath)
 		if err != nil {
 			continue
 		}
@@ -297,7 +297,7 @@ func isSlugUsedInOtherChats(slug string, excludeUUID string) bool {
 		return false
 	}
 
-	matches, err := filepath.Glob(filepath.Join(projectsDir, "*", "*"+transcriptExt))
+	matches, err := allTranscripts()
 	if err != nil {
 		return true // safe default: keep plan file if we cannot verify
 	}
@@ -436,8 +436,10 @@ func findRelatedFiles(chat Chat) []string {
 	// written only when an event could not be delivered. The uuid must be a
 	// whole dot-separated component: a bare substring match would also hit
 	// files that merely carry it as their trailing id.
-	telemetryMatches, _ := filepath.Glob(filepath.Join(telemetryDir, "*."+uuid+".*.json"))
-	files = append(files, telemetryMatches...)
+	files = append(files, filesNamed(telemetryDir, func(name string) bool {
+		i := strings.Index(name, "."+uuid+".")
+		return i >= 0 && strings.HasSuffix(name[i+len(uuid)+2:], ".json")
+	})...)
 
 	files = append(files, jobRelatedFiles(uuid)...)
 
@@ -543,8 +545,9 @@ func legacyRelatedFiles(uuid, chatJSONLPath string) []string {
 	}
 
 	// Todo files
-	todoMatches, _ := filepath.Glob(filepath.Join(todosDir, uuid+"*.json"))
-	files = append(files, todoMatches...)
+	files = append(files, filesNamed(todosDir, func(name string) bool {
+		return strings.HasPrefix(name, uuid) && strings.HasSuffix(name[len(uuid):], ".json")
+	})...)
 
 	// Plan file (via slug), deleted only when no other chat references the slug
 	if chatJSONLPath != "" {
@@ -608,21 +611,124 @@ func parseAgentIDs(chatFile string) (ids []string, ok bool) {
 	return agentIDs, scanner.Err() == nil
 }
 
-// deleteChats deletes all files related to the given chats and updates sessions index.
-// Returns count of deleted chats or an error.
+// deleteChats deletes all files related to the given chats, updates sessions
+// index and drops the chats' prompts from the shared history file.
+// Returns count of deleted chats or an error. A *historyPruneError comes with
+// the full count: the chats are gone, only their prompt history is left behind.
 func deleteChats(chats []Chat) (int, error) {
 	count := 0
+	var failure error
+	gone := make(map[string]bool)
 	for _, chat := range chats {
-		files := findRelatedFiles(chat)
-		for _, file := range files {
-			if err := os.RemoveAll(file); err != nil {
-				return 0, fmt.Errorf("failed to delete %s: %w", file, err)
-			}
+		failure = deleteChatFiles(chat)
+
+		// History is keyed by uuid alone, so it is pruned only once no
+		// transcript carries the uuid any more. That covers a deletion that
+		// failed after the transcript was removed, and spares the prompts of a
+		// same-uuid transcript in another project.
+		if chat.UUID != "" && !transcriptExists(chat.UUID) {
+			gone[chat.UUID] = true
 		}
-		if err := updateSessionsIndex(chat.UUID); err != nil {
-			return 0, fmt.Errorf("failed to update index: %w", err)
+		if failure != nil {
+			break
 		}
 		count++
 	}
+
+	pruneErr := pruneHistory(gone)
+	switch {
+	case failure != nil && pruneErr != nil:
+		return 0, fmt.Errorf("%w; %v", failure, &historyPruneError{pruneErr})
+	case failure != nil:
+		return 0, failure
+	case pruneErr != nil:
+		return count, &historyPruneError{pruneErr}
+	}
 	return count, nil
+}
+
+func deleteChatFiles(chat Chat) error {
+	for _, file := range findRelatedFiles(chat) {
+		if err := os.RemoveAll(file); err != nil {
+			return fmt.Errorf("failed to delete %s: %w", file, err)
+		}
+	}
+	if err := updateSessionsIndex(chat.UUID); err != nil {
+		return fmt.Errorf("failed to update index: %w", err)
+	}
+	return nil
+}
+
+// transcriptExists reports whether any project still holds a transcript for
+// the uuid. A lookup that fails counts as "yes": the caller uses a "no" to
+// remove data.
+func transcriptExists(uuid string) bool {
+	matches, err := allTranscripts()
+	if err != nil {
+		return true
+	}
+	for _, path := range matches {
+		if filepath.Base(path) == uuid+transcriptExt {
+			return true
+		}
+	}
+	return false
+}
+
+// filesNamed lists the entries of dir whose name satisfies match. Directory
+// contents are matched by name rather than a glob, which would read pattern
+// characters in the Claude directory's own path as wildcards. A directory that
+// cannot be read yields nothing.
+func filesNamed(dir string, match func(name string) bool) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, e := range entries {
+		if match(e.Name()) {
+			files = append(files, filepath.Join(dir, e.Name()))
+		}
+	}
+	return files
+}
+
+// transcriptsIn lists the transcripts directly inside a project directory.
+func transcriptsIn(projectPath string) ([]string, error) {
+	entries, err := os.ReadDir(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), transcriptExt) {
+			files = append(files, filepath.Join(projectPath, e.Name()))
+		}
+	}
+	return files, nil
+}
+
+// allTranscripts lists the transcripts of every project. A project directory
+// that cannot be read is an error rather than an empty result: callers decide
+// from the list whether data is safe to remove.
+func allTranscripts() ([]string, error) {
+	projects, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, p := range projects {
+		if p.Type().IsRegular() {
+			continue
+		}
+		found, err := transcriptsIn(filepath.Join(projectsDir, p.Name()))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, found...)
+	}
+	return files, nil
 }

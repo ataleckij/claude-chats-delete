@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -74,6 +75,8 @@ func adaptiveColor(rich string, fallback string) lipgloss.TerminalColor {
 // Messages
 type deleteCompleteMsg struct {
 	count int
+	// warning is set when the chats were deleted but a follow-up cleanup failed.
+	warning string
 }
 
 type errMsg string
@@ -601,7 +604,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuildGroupRows()
 		}
 		// Clear other status messages
-		m.error = ""
+		m.error = msg.warning
 		m.copiedMsg = ""
 		if len(m.chats) == 0 {
 			return m, tea.Quit
@@ -1376,6 +1379,10 @@ func (m model) deleteSelectedChats() tea.Cmd {
 			}
 		}
 		count, err := deleteChats(toDelete)
+		var pruneErr *historyPruneError
+		if errors.As(err, &pruneErr) {
+			return deleteCompleteMsg{count: count, warning: pruneErr.Error()}
+		}
 		if err != nil {
 			return errMsg(err.Error())
 		}
