@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -71,6 +72,18 @@ func adaptiveColor(rich string, fallback string) lipgloss.TerminalColor {
 		return lipgloss.Color(fallback)
 	}
 	return lipgloss.Color(rich)
+}
+
+// displayText makes text read from Claude's files safe to print in a single
+// row: every control character, newlines and escape sequences included,
+// becomes a space, so file contents cannot drive the terminal.
+func displayText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }
 
 // Messages
@@ -922,9 +935,9 @@ func (m model) View() string {
 			lines = fmt.Sprintf("%d", chat.LineCount)
 		}
 
-		titleClean := strings.NewReplacer("\n", " ").Replace(chat.Title)
+		titleClean := displayText(chat.Title)
 		title := runewidth.Truncate(titleClean, titleWidth, "..")
-		projectClean := strings.NewReplacer("\n", " ").Replace(chat.Project)
+		projectClean := displayText(chat.Project)
 		project := truncateLeft(projectClean, projectWidth-2)
 
 		// Selection indicator
@@ -1284,7 +1297,7 @@ func (m model) viewGrouped() string {
 				indicator = "[~]"
 			}
 
-			projectClean := strings.NewReplacer("\n", " ").Replace(row.project)
+			projectClean := displayText(row.project)
 			countInfo := dimStyle.Render(fmt.Sprintf("(%d chats, %d selected)", total, sel))
 			left := fmt.Sprintf("%s %s %s", indicator, arrow, projectClean)
 
@@ -1325,7 +1338,7 @@ func (m model) viewGrouped() string {
 				lines = fmt.Sprintf("%d", chat.LineCount)
 			}
 
-			titleClean := strings.NewReplacer("\n", " ").Replace(chat.Title)
+			titleClean := displayText(chat.Title)
 			title := runewidth.Truncate(titleClean, titleWidth, "..")
 
 			indicator := "[ ]"

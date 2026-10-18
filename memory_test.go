@@ -205,6 +205,33 @@ func TestViewMemory_ShowsError(t *testing.T) {
 	}
 }
 
+func TestViewMemory_StripsControlCharacters(t *testing.T) {
+	// A quoted description is unescaped by the frontmatter parser, so "\x1b"
+	// written as text must not reach the terminal as a real escape either.
+	description, _ := parseMemoryFrontmatter([]byte("---\ndescription: \"\\x1b]0;pwned\\x07 quoted\"\n---\n"))
+	files := makeTestMemory(1, 1)
+	files[0].Description = description
+	files[0].Name = "raw\x1b[2Jname.md"
+	m := makeMemoryModel(files, false, normalWidth, 20)
+
+	output := m.View()
+	for _, seq := range []string{"\x1b]0;pwned", "\x07", "\x1b[2J"} {
+		if strings.Contains(output, seq) {
+			t.Errorf("view must not contain control sequence %q", seq)
+		}
+	}
+	if !strings.Contains(output, "quoted") || !strings.Contains(output, "name.md") {
+		t.Errorf("printable text around the control characters must stay\noutput:\n%s", stripANSI(output))
+	}
+}
+
+func TestDisplayText(t *testing.T) {
+	got := displayText("a\nb\r\tc\x1b[31md\u009be")
+	if want := "a b  c [31md e"; got != want {
+		t.Errorf("displayText = %q, want %q", got, want)
+	}
+}
+
 func TestUpdateMemory_NavigationAndExpand(t *testing.T) {
 	m := makeMemoryModel(makeTestMemory(2, 3), true, normalWidth, 20)
 

@@ -241,7 +241,7 @@ func (m model) viewMemory() string {
 			if m.memExpanded[row.project] {
 				arrow = "▾"
 			}
-			projectClean := strings.NewReplacer("\n", " ").Replace(row.project)
+			projectClean := displayText(row.project)
 			countInfo := dimStyle.Render(fmt.Sprintf("(%d files)", m.memoryCountForProject(row.project)))
 			left := fmt.Sprintf("%s %s", arrow, projectClean)
 
@@ -259,13 +259,13 @@ func (m model) viewMemory() string {
 				timestamp = timestamp[5:16] // "MM-DD HH:MM"
 			}
 			timestamp = runewidth.Truncate(timestamp, timestampWidth, "")
-			name := runewidth.Truncate(strings.NewReplacer("\n", " ").Replace(f.Name), nameWidth, "..")
-			description := runewidth.Truncate(strings.NewReplacer("\n", " ", "\r", "").Replace(f.Description), descWidth, "..")
+			name := runewidth.Truncate(displayText(f.Name), nameWidth, "..")
+			description := runewidth.Truncate(displayText(f.Description), descWidth, "..")
 
 			if m.grouped {
 				line = fmt.Sprintf("    %-*s  %-*s  %-*s", timestampWidth, timestamp, nameWidth, name, descWidth, description)
 			} else {
-				projectClean := strings.NewReplacer("\n", " ").Replace(f.Project)
+				projectClean := displayText(f.Project)
 				project := truncateLeft(projectClean, projectWidth-2)
 				line = fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s", timestampWidth, timestamp, nameWidth, name, descWidth, description, projectWidth, project)
 			}
