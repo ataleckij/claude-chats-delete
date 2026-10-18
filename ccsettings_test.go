@@ -423,3 +423,114 @@ func TestParseCleanupPeriodSharesTheSnapshot(t *testing.T) {
 		t.Error("malformed content should report an error")
 	}
 }
+
+func TestReadIdleCompaction(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings string
+		wantOn   bool
+		wantSet  bool
+		wantErr  bool
+	}{
+		{"no file", "", true, false, false},
+		{"key absent", `{"model": "opus"}`, true, false, false},
+		{"false", `{"idleCompaction": false}`, false, true, false},
+		{"true", `{"idleCompaction": true}`, true, true, false},
+		{"not a boolean", `{"idleCompaction": "no"}`, true, false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			useTempClaudeDir(t, tt.settings)
+			on, set, err := readIdleCompaction()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if on != tt.wantOn || set != tt.wantSet {
+				t.Errorf("got on=%v set=%v, want on=%v set=%v", on, set, tt.wantOn, tt.wantSet)
+			}
+		})
+	}
+}
+
+func TestWriteIdleCompactionPreservesTheFile(t *testing.T) {
+	const settings = `{
+  "model": "opus[1m]",
+  "idleCompaction": true,
+  "cleanupPeriodDays": 30
+}
+`
+	path := useTempClaudeDir(t, settings)
+
+	if err := writeIdleCompaction(false, nil); err != nil {
+		t.Fatalf("writeIdleCompaction: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(settings, `"idleCompaction": true`, `"idleCompaction": false`, 1)
+	if string(got) != want {
+		t.Errorf("file changed beyond the value:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+func TestWriteIdleCompactionInsertsAndCreates(t *testing.T) {
+	path := useTempClaudeDir(t, "{\n  \"model\": \"opus\"\n}\n")
+	if err := writeIdleCompaction(false, nil); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	if want := "{\n  \"idleCompaction\": false,\n  \"model\": \"opus\"\n}\n"; string(got) != want {
+		t.Errorf("inserted:\n%s\nwant:\n%s", got, want)
+	}
+
+	path = useTempClaudeDir(t, "")
+	if err := writeIdleCompaction(false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if on, set, err := readIdleCompaction(); err != nil || on || !set {
+		t.Errorf("new file holds on=%v set=%v err=%v, want false/true/nil", on, set, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("settings file not created: %v", err)
+	}
+}
+
+func TestSameJSON(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want bool
+	}{
+		{`90`, `90.0`, true},
+		{`true`, ` true `, true},
+		{`{"b":1, "a":[1,2]}`, `{"a":[1,2],"b":1}`, true},
+		{`true`, `false`, false},
+		{`[1,2]`, `[2,1]`, false},
+		{`not json`, `1`, false},
+	}
+	for _, tt := range tests {
+		if got := sameJSON([]byte(tt.a), []byte(tt.b)); got != tt.want {
+			t.Errorf("sameJSON(%s, %s) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestWriteIdleCompactionDetectsConflict(t *testing.T) {
+	useTempClaudeDir(t, `{"idleCompaction": false}`)
+
+	// We believed the key was absent; in fact it holds false.
+	err := writeIdleCompaction(false, &idleCompactionState{on: true, set: false})
+	conflict, ok := err.(*idleCompactionConflictError)
+	if !ok {
+		t.Fatalf("expected a conflict, got %v", err)
+	}
+	if conflict.current.on || !conflict.current.set {
+		t.Errorf("conflict reports on=%v set=%v, want false/true", conflict.current.on, conflict.current.set)
+	}
+	if err := writeIdleCompaction(true, nil); err != nil {
+		t.Fatalf("forced write: %v", err)
+	}
+	if on, _, _ := readIdleCompaction(); !on {
+		t.Error("forced write did not store true")
+	}
+}

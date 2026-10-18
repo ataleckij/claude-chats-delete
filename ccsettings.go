@@ -9,10 +9,16 @@ import (
 	"strings"
 )
 
-// Claude Code's own settings file and the retention key this tool exposes.
+// Claude Code's own settings file and the keys this tool exposes.
 const (
 	claudeSettingsFile = "settings.json"
 	cleanupPeriodKey   = "cleanupPeriodDays"
+	idleCompactionKey  = "idleCompaction"
+
+	// defaultIdleCompaction is what Claude Code applies when the key is absent.
+	// true only means "not turned off": Claude Code still decides on its own
+	// whether a conversation qualifies.
+	defaultIdleCompaction = true
 
 	// defaultCleanupPeriod is what Claude Code applies when the key is absent.
 	defaultCleanupPeriod = 30
@@ -144,24 +150,116 @@ func writeCleanupPeriod(days int, expect *cleanupState) error {
 		}
 	}
 
-	updated, err := setJSONNumber(original, cleanupPeriodKey, days)
+	return setSettingsKey(path, original, cleanupPeriodKey, days)
+}
+
+// readIdleCompaction returns the idleCompaction value from Claude Code's
+// settings; set reports whether the key is present. A missing file is not an
+// error.
+func readIdleCompaction() (on bool, set bool, err error) {
+	data, err := os.ReadFile(claudeSettingsPath())
+	if os.IsNotExist(err) {
+		return defaultIdleCompaction, false, nil
+	}
+	if err != nil {
+		return defaultIdleCompaction, false, err
+	}
+	return parseIdleCompaction(data)
+}
+
+// parseIdleCompaction reads idleCompaction out of settings content already in
+// hand.
+func parseIdleCompaction(data []byte) (on bool, set bool, err error) {
+	if len(strings.TrimSpace(string(data))) == 0 {
+		return defaultIdleCompaction, false, nil
+	}
+
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return defaultIdleCompaction, false, fmt.Errorf("%s is not valid JSON: %w", claudeSettingsFile, err)
+	}
+
+	raw, ok := settings[idleCompactionKey]
+	if !ok {
+		return defaultIdleCompaction, false, nil
+	}
+	if err := json.Unmarshal(raw, &on); err != nil {
+		return defaultIdleCompaction, false, fmt.Errorf("%s holds %s, not true or false: %w", idleCompactionKey, raw, err)
+	}
+	return on, true, nil
+}
+
+// idleCompactionState is an idleCompaction value as it was observed: set
+// reports whether the key was present at all.
+type idleCompactionState struct {
+	on  bool
+	set bool
+}
+
+// idleCompactionConflictError says the file no longer holds the value the
+// caller based its edit on.
+type idleCompactionConflictError struct {
+	current idleCompactionState
+}
+
+func (e *idleCompactionConflictError) Error() string {
+	if !e.current.set {
+		return fmt.Sprintf("%s was removed from %s in the meantime", idleCompactionKey, claudeSettingsFile)
+	}
+	return fmt.Sprintf("%s changed to %t in %s in the meantime", idleCompactionKey, e.current.on, claudeSettingsFile)
+}
+
+// writeIdleCompaction stores on in Claude Code's settings file with the same
+// guarantees as writeCleanupPeriod: only that key's bytes change, and when
+// expect is non-nil the file must still hold that value, otherwise an
+// *idleCompactionConflictError is returned and nothing is written.
+func writeIdleCompaction(on bool, expect *idleCompactionState) error {
+	path := claudeSettingsPath()
+	original, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		original = nil
+	} else if err != nil {
+		return err
+	}
+
+	if expect != nil {
+		current, set, err := parseIdleCompaction(original)
+		if err != nil {
+			return err
+		}
+		if current != expect.on || set != expect.set {
+			return &idleCompactionConflictError{current: idleCompactionState{on: current, set: set}}
+		}
+	}
+
+	return setSettingsKey(path, original, idleCompactionKey, on)
+}
+
+// setSettingsKey writes original back to path with key set to value, after
+// checking that nothing else in the file changed.
+func setSettingsKey(path string, original []byte, key string, value any) error {
+	literal, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	if err := verifyOnlyKeyChanged(original, updated, cleanupPeriodKey, days); err != nil {
+	updated, err := setJSONValue(original, key, string(literal))
+	if err != nil {
+		return err
+	}
+	if err := verifyOnlyKeyChanged(original, updated, key, value); err != nil {
 		return err
 	}
 	return writeFileAtomic(path, updated)
 }
 
-// setJSONNumber returns content with key set to value at the top level. An
-// existing key has only its value bytes replaced; a new key is inserted first,
-// matching the indentation already in the file. Empty content becomes a new
-// object.
-func setJSONNumber(content []byte, key string, value int) ([]byte, error) {
+// setJSONValue returns content with key set to literal, a JSON value, at the
+// top level. An existing key has only its value bytes replaced; a new key is
+// inserted first, matching the indentation already in the file. Empty content
+// becomes a new object.
+func setJSONValue(content []byte, key, literal string) ([]byte, error) {
 	trimmed := strings.TrimSpace(string(content))
 	if trimmed == "" {
-		return []byte(fmt.Sprintf("{\n  %q: %d\n}\n", key, value)), nil
+		return []byte(fmt.Sprintf("{\n  %q: %s\n}\n", key, literal)), nil
 	}
 
 	start, end, found, err := topLevelValueRange(content, key)
@@ -172,16 +270,16 @@ func setJSONNumber(content []byte, key string, value int) ([]byte, error) {
 	if found {
 		var out []byte
 		out = append(out, content[:start]...)
-		out = append(out, []byte(fmt.Sprintf("%d", value))...)
+		out = append(out, literal...)
 		out = append(out, content[end:]...)
 		return out, nil
 	}
-	return insertFirstKey(content, key, value)
+	return insertFirstKey(content, key, literal)
 }
 
 // insertFirstKey adds key right after the opening brace, so no existing entry
 // has to be located or rewritten.
-func insertFirstKey(content []byte, key string, value int) ([]byte, error) {
+func insertFirstKey(content []byte, key, literal string) ([]byte, error) {
 	open := strings.IndexByte(string(content), '{')
 	if open < 0 {
 		return nil, fmt.Errorf("%s does not contain a JSON object", claudeSettingsFile)
@@ -190,7 +288,7 @@ func insertFirstKey(content []byte, key string, value int) ([]byte, error) {
 	rest := strings.TrimLeft(string(content[open+1:]), " \t")
 	empty := strings.HasPrefix(strings.TrimLeft(rest, "\r\n"), "}")
 
-	entry := fmt.Sprintf("%q: %d", key, value)
+	entry := fmt.Sprintf("%q: %s", key, literal)
 	var insert string
 	switch {
 	case strings.HasPrefix(rest, "\n") || strings.HasPrefix(rest, "\r\n"):
@@ -287,7 +385,7 @@ func indexOfValue(span []byte) int {
 // value: the result must be valid JSON, carry the new value, and keep exactly
 // the original top-level keys plus this one. A byte-offset edit that went wrong
 // is caught here rather than on disk.
-func verifyOnlyKeyChanged(original, updated []byte, key string, value int) error {
+func verifyOnlyKeyChanged(original, updated []byte, key string, value any) error {
 	if !json.Valid(updated) {
 		return fmt.Errorf("edit would have produced invalid JSON, %s left unchanged", claudeSettingsFile)
 	}
@@ -297,13 +395,19 @@ func verifyOnlyKeyChanged(original, updated []byte, key string, value int) error
 		return err
 	}
 
-	var got int
 	raw, ok := after[key]
 	if !ok {
 		return fmt.Errorf("edit did not set %s", key)
 	}
-	if err := json.Unmarshal(raw, &got); err != nil || got != value {
-		return fmt.Errorf("edit did not store %d in %s", value, key)
+	// Both sides are decoded and encoded again before comparing, so the check
+	// does not depend on how the bytes were formatted and works for any JSON
+	// value, objects included.
+	want, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	if !sameJSON(raw, want) {
+		return fmt.Errorf("edit did not store %v in %s", value, key)
 	}
 
 	before := map[string]json.RawMessage{}
@@ -327,6 +431,17 @@ func verifyOnlyKeyChanged(original, updated []byte, key string, value int) error
 		}
 	}
 	return nil
+}
+
+// sameJSON reports whether a and b encode the same JSON value.
+func sameJSON(a, b []byte) bool {
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	ea, errA := json.Marshal(va)
+	eb, errB := json.Marshal(vb)
+	return errA == nil && errB == nil && bytes.Equal(ea, eb)
 }
 
 // resolveSymlink returns the file a path ultimately points at. A path that is

@@ -158,6 +158,15 @@ type model struct {
 	cleanupBase     cleanupState
 	cleanupConflict *cleanupState
 
+	// Claude Code's idleCompaction, cached like the retention period. Enter
+	// flips it and writes at once; when the file changed in the meantime,
+	// idleConflict holds what was found and idleDraft the value still to be
+	// written, until a second Enter overwrites or Esc cancels.
+	idleOn       bool
+	idleSet      bool
+	idleDraft    bool
+	idleConflict *idleCompactionState
+
 	// Grouped view state. grouped applies to the chats and memory tabs alike;
 	// each keeps its own expanded projects and row list.
 	grouped          bool
@@ -236,10 +245,10 @@ func formatDays(days int) string {
 	return fmt.Sprintf("%d days", days)
 }
 
-// loadCleanupPeriod refreshes the cached retention value from Claude Code's
-// settings. It is called when the settings tab is opened, never from the view,
-// so rendering stays free of disk access.
-func (m *model) loadCleanupPeriod() {
+// loadClaudeSettings refreshes the cached values from Claude Code's settings.
+// It is called when the settings tab is opened, never from the view, so
+// rendering stays free of disk access.
+func (m *model) loadClaudeSettings() {
 	if m.tab != tabSettings {
 		return
 	}
@@ -248,6 +257,45 @@ func (m *model) loadCleanupPeriod() {
 		m.error = err.Error()
 	}
 	m.cleanupDays, m.cleanupSet = days, set
+
+	on, set, err := readIdleCompaction()
+	if err != nil {
+		m.error = err.Error()
+	}
+	m.idleOn, m.idleSet = on, set
+}
+
+// applyIdleCompaction writes idleDraft. Like the retention editor, it refuses
+// to overwrite a value that changed on disk since it was shown, until the
+// user confirms with a second Enter.
+func (m *model) applyIdleCompaction() {
+	expect := &idleCompactionState{on: m.idleOn, set: m.idleSet}
+	if m.idleConflict != nil {
+		expect = nil // the user has seen the competing value and chose to proceed
+	}
+
+	err := writeIdleCompaction(m.idleDraft, expect)
+	if conflict, ok := err.(*idleCompactionConflictError); ok {
+		current := conflict.current
+		if current.set && current.on == m.idleDraft {
+			// Changed elsewhere to exactly what we meant to write: done.
+			m.idleOn, m.idleSet = current.on, true
+			m.idleConflict = nil
+			m.error = ""
+			return
+		}
+		m.idleConflict = &current
+		m.idleOn, m.idleSet = current.on, current.set
+		m.error = ""
+		return
+	}
+	m.idleConflict = nil
+	if err != nil {
+		m.error = err.Error()
+		return
+	}
+	m.idleOn, m.idleSet = m.idleDraft, true
+	m.error = ""
 }
 
 // applyCleanupDraft writes the drafted retention value. The first Enter refuses
@@ -388,6 +436,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// A pending idleCompaction overwrite also runs before the global
+		// bindings, so Esc cancels it instead of quitting.
+		if m.idleConflict != nil {
+			switch msg.Type {
+			case tea.KeyCtrlC:
+				return m, tea.Quit
+			case tea.KeyEsc:
+				m.idleConflict = nil
+				m.error = ""
+			case tea.KeyEnter:
+				m.applyIdleCompaction()
+			}
+			return m, nil
+		}
+
 		// The directory editor takes every key before the global bindings, so a
 		// typed q or arrow key edits the path instead of quitting or switching
 		// tabs.
@@ -411,7 +474,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.memExpanded = make(map[string]bool)
 					m.loadMemory()
 					m.chats = findAllChats()
-					m.loadCleanupPeriod()
+					m.loadClaudeSettings()
 					m.selected = make(map[int]bool)
 					m.autoSelected = false
 					m.expandedProjects = make(map[string]bool)
@@ -440,13 +503,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left":
 			if m.tab > 0 {
 				m.tab--
-				m.loadCleanupPeriod()
+				m.loadClaudeSettings()
 			}
 			return m, nil
 		case "right":
 			if m.tab < len(tabs)-1 {
 				m.tab++
-				m.loadCleanupPeriod()
+				m.loadClaudeSettings()
 			}
 			return m, nil
 		}
@@ -474,6 +537,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cleanupBase = cleanupState{days: m.cleanupDays, set: m.cleanupSet}
 					m.cleanupConflict = nil
 					m.error = ""
+					return m, nil
+				}
+				if m.settingsCursor == settingIdleCompaction {
+					m.idleDraft = !m.idleOn
+					m.applyIdleCompaction()
 					return m, nil
 				}
 				if m.cfg != nil {
@@ -701,7 +769,8 @@ const (
 	settingGroupByProject = 1
 	settingClaudeDir      = 2
 	settingCleanupPeriod  = 3
-	settingsCount         = 4
+	settingIdleCompaction = 4
+	settingsCount         = 5
 )
 
 func (m model) viewSettings() string {
@@ -784,7 +853,7 @@ func (m model) viewSettings() string {
 		// what is on disk.
 		cleanupVal = "-> " + formatDays(m.cleanupDraft)
 	}
-	cleanupLine := fmt.Sprintf("  %s  %s", cleanupPeriodKey, cleanupVal)
+	cleanupLine := fmt.Sprintf("  %-17s  %s", cleanupPeriodKey, cleanupVal)
 	switch {
 	case m.editingCleanup:
 		s.WriteString(selectedStyle.Render(cleanupLine))
@@ -817,6 +886,37 @@ func (m model) viewSettings() string {
 	}
 
 	s.WriteString("\n")
+	idleVal := fmt.Sprintf("%t", m.idleOn)
+	if !m.idleSet {
+		idleVal += " (default)"
+	}
+	idleLine := fmt.Sprintf("  %-17s  %s", idleCompactionKey, idleVal)
+	switch {
+	case m.idleConflict != nil:
+		s.WriteString(selectedStyle.Render(idleLine))
+	case m.settingsCursor == settingIdleCompaction:
+		s.WriteString(cursorStyle.Render(idleLine))
+	default:
+		s.WriteString(idleLine)
+	}
+	s.WriteString("\n")
+	if m.idleConflict != nil {
+		found := fmt.Sprintf("%t", m.idleConflict.on)
+		if !m.idleConflict.set {
+			found = "no value"
+		}
+		s.WriteString(errorStyle.Render(fmt.Sprintf("                     Changed to %s elsewhere. Set %t anyway?",
+			found, m.idleDraft)))
+		s.WriteString("\n")
+	} else {
+		s.WriteString(dimStyle.Render("                     Compacts a long idle conversation; false turns it off"))
+		s.WriteString("\n")
+		s.WriteString(dimStyle.Render(fmt.Sprintf("                     Absent from %s, the default is %t",
+			claudeSettingsFile, defaultIdleCompaction)))
+		s.WriteString("\n")
+	}
+
+	s.WriteString("\n")
 	s.WriteString(dimStyle.Render(strings.Repeat("─", width)))
 	s.WriteString("\n")
 	// Failures here come from Claude Code's settings file (a malformed file, a
@@ -827,7 +927,7 @@ func (m model) viewSettings() string {
 	}
 	if m.editingDir {
 		s.WriteString(helpStyle.Render("Type a path | Enter:Save | Esc:Cancel"))
-	} else if m.cleanupConflict != nil {
+	} else if m.cleanupConflict != nil || m.idleConflict != nil {
 		s.WriteString(helpStyle.Render("Enter:Overwrite | Esc:Cancel"))
 	} else if m.editingCleanup {
 		s.WriteString(helpStyle.Render("←/→:Change | Enter:Save | Esc:Cancel"))

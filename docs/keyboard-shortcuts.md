@@ -53,7 +53,9 @@ Lists the project memory notes (`projects/<project>/memory/*.md`); the
 
 - **`↑`** / **`↓`** (or **`k`** / **`j`**) - Move between settings
 - **`ENTER`** - Toggle the setting, or open an editor for the rows that hold a
-  value (Claude directory, `cleanupPeriodDays`)
+  value (Claude directory, `cleanupPeriodDays`). On `idleCompaction` it flips
+  the value between `true` and `false` and saves it to Claude Code's
+  `settings.json` right away
 
 ### Editing the Claude directory
 
@@ -61,6 +63,13 @@ Lists the project memory notes (`projects/<project>/memory/*.md`); the
 - **`ENTER`** - Apply and reload the chat list from the new directory
 - **`ESC`** - Cancel
 - **`Ctrl+C`** - Quit the application
+
+### Changing `idleCompaction`
+
+- **`ENTER`** - Flip the value and save it. If the value changed on disk since
+  the tab was opened, the new value is shown instead and a second **`ENTER`**
+  confirms the overwrite
+- **`ESC`** - Cancel a pending overwrite
 
 ### Editing `cleanupPeriodDays`
 

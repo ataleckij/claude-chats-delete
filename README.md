@@ -25,7 +25,7 @@ Tested with Claude Code **v2.1.274**.
 - Browse and delete project memory notes (`projects/<project>/memory/*.md`) in the **Memory** tab, keeping each project's `MEMORY.md` index in sync
 - Copy chat UUID to clipboard
 - Point the tool at any Claude directory, honoring `CLAUDE_CONFIG_DIR`
-- View and change how long Claude Code keeps its own sessions (`cleanupPeriodDays`)
+- View and change how long Claude Code keeps its own sessions (`cleanupPeriodDays`) and whether it compacts idle conversations (`idleCompaction`)
 - Keyboard-driven interface with vim keys and fast page navigation
 - Auto-update via GitHub releases
 
@@ -126,6 +126,16 @@ so. Press `ENTER` to edit, `←`/`→` to pick a value, `ENTER` to save or `ESC`
 discard. Only that one key is rewritten: the rest of the file, including key
 order and formatting, is left byte for byte as it was, and if the value changed
 on disk while you were editing, the tool reports it and asks before overwriting.
+
+### Claude Code's idle compaction
+
+Below it, the **Settings** tab shows `idleCompaction` from the same file. When
+`true`, Claude Code may compact a long conversation left idle before its prompt
+cache expires; `false` turns that off. When the key is absent, Claude Code
+applies `true` and the row says so; `true` does not force compaction, it only
+leaves the decision to Claude Code. Press `ENTER` on the row to flip the value:
+it is written at once, with the same byte-for-byte edit and the same check for a
+value changed on disk in the meantime.
 
 ## 8. Star History
 

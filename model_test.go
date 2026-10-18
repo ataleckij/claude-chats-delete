@@ -843,7 +843,7 @@ func settingsModelWithClaudeSettings(t *testing.T, settings string) model {
 	}
 	m := settingsModel(t, dir)
 	m.settingsCursor = settingCleanupPeriod
-	m.loadCleanupPeriod()
+	m.loadClaudeSettings()
 	return m
 }
 
@@ -1004,5 +1004,93 @@ func TestSettings_ShowsErrorInView(t *testing.T) {
 	}
 	if view := stripANSI(m.View()); !strings.Contains(view, "Error:") {
 		t.Errorf("settings view does not show the error:\n%s", view)
+	}
+}
+
+func TestSettings_IdleCompactionToggles(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"model": "opus"}`)
+	m.settingsCursor = settingIdleCompaction
+
+	if view := stripANSI(m.View()); !strings.Contains(view, "idleCompaction     true (default)") {
+		t.Fatalf("view does not show the default:\n%s", view)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if on, set, err := readIdleCompaction(); err != nil || on || !set {
+		t.Fatalf("after Enter the file holds on=%v set=%v err=%v, want false", on, set, err)
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "idleCompaction     false") {
+		t.Errorf("view does not show false:\n%s", view)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if on, set, _ := readIdleCompaction(); !on || !set {
+		t.Errorf("second Enter should store true, got on=%v set=%v", on, set)
+	}
+}
+
+func TestSettings_IdleCompactionSameChangeElsewhereIsNoConflict(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"model": "opus"}`)
+	m.settingsCursor = settingIdleCompaction
+
+	// Someone else already turned it off, which is what Enter is about to do.
+	if err := writeIdleCompaction(false, nil); err != nil {
+		t.Fatal(err)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.idleConflict != nil {
+		t.Fatalf("the file already holds the wanted value, no overwrite should be asked: %+v", *m.idleConflict)
+	}
+	if m.idleOn || !m.idleSet {
+		t.Errorf("model shows on=%v set=%v, want false/true", m.idleOn, m.idleSet)
+	}
+}
+
+func TestSettings_IdleCompactionConflict(t *testing.T) {
+	m := settingsModelWithClaudeSettings(t, `{"model": "opus"}`)
+	m.settingsCursor = settingIdleCompaction
+
+	// Someone sets the key after the tab was opened.
+	if err := writeIdleCompaction(true, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.idleConflict == nil {
+		t.Fatal("a changed file should be reported as a conflict")
+	}
+	if on, _, _ := readIdleCompaction(); !on {
+		t.Fatal("the refused write must leave the file at true")
+	}
+	if view := stripANSI(m.View()); !strings.Contains(view, "Changed to true elsewhere. Set false anyway?") {
+		t.Errorf("view does not explain the conflict:\n%s", view)
+	}
+
+	// Esc cancels instead of quitting.
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if cmd != nil || m.idleConflict != nil {
+		t.Fatalf("Esc should only cancel: cmd=%v conflict=%v", cmd != nil, m.idleConflict)
+	}
+
+	// Enter again starts from the value now known, so it writes without asking.
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if on, _, _ := readIdleCompaction(); on || m.idleConflict != nil {
+		t.Errorf("Enter after cancelling should store false, got on=%v conflict=%v", on, m.idleConflict)
+	}
+
+	// A conflict confirmed with a second Enter overwrites: the key is removed
+	// elsewhere while the model still shows false.
+	path := filepath.Join(claudeDir, claudeSettingsFile)
+	if err := os.WriteFile(path, []byte(`{"model": "opus"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.idleConflict == nil || m.idleConflict.set {
+		t.Fatalf("removing the key elsewhere should be a conflict, got %+v", m.idleConflict)
+	}
+	m = send(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if on, set, _ := readIdleCompaction(); !on || !set || m.idleConflict != nil {
+		t.Errorf("second Enter should store true: on=%v set=%v conflict=%v", on, set, m.idleConflict)
 	}
 }
