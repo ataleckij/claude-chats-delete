@@ -175,12 +175,17 @@ func scanChatMetadata(jsonlFile string) (title, version, forkParentID string, li
 	var firstUserMsg, firstSummary, lastCustomTitle, lastAiTitle, lastAgentName string
 
 	for scanner.Scan() {
-		lineCount++
-
 		var msg JSONLMessage
 		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			lineCount++
 			continue
 		}
+		// The request log is left out of the count, so sessions written before
+		// and after it appeared stay comparable.
+		if strings.HasPrefix(msg.Type, recordAPIRequestPrefix) {
+			continue
+		}
+		lineCount++
 
 		if version == "" && msg.Version != "" {
 			version = msg.Version

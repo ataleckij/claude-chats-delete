@@ -102,6 +102,11 @@ const (
 	recordSummary     = "summary"
 )
 
+// Prefix of the request log Claude Code writes into transcripts since v2.1.300
+// (api-request, api-request-blob, api-request-shape): each API request's system
+// prompt, tools and parameters. Bookkeeping, not conversation.
+const recordAPIRequestPrefix = "api-request"
+
 var (
 	configPath     = filepath.Join(os.Getenv("HOME"), ".config", "claude-chats", "config.json")
 	claudeDir      string
@@ -124,7 +129,7 @@ var (
 	agentsDir string
 )
 
-// Entries under ~/.claude surveyed on v2.1.296, with their cleanup status:
+// Entries under ~/.claude surveyed on v2.1.302, with their cleanup status:
 //   - history.jsonl  prompt history shared by every session, one record per
 //                  prompt, tagged with sessionId. A deleted chat's records are
 //                  dropped by pruneHistory; the file itself stays.
@@ -147,6 +152,10 @@ var (
 //                  project's own .claude/, so they are out of scope here.
 //   - jobs/        background-session state, covered by findRelatedFiles.
 //                  pins.json in that directory is global and never removed.
+//   - backups/     timestamped copies of ~/.claude.json, cache/ (changelog,
+//                  model catalog), stats-cache.json, dev-mods/, ide/,
+//                  bridge-spawn/: global or runtime state, no session key
+//                  seen: not deleted per chat.
 //
 // TODO: verify later, purpose unknown - downloads/ has stayed empty since it
 // appeared, so there is nothing to judge yet. Re-check whether it becomes

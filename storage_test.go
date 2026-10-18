@@ -326,6 +326,26 @@ func TestScanChatMetadata(t *testing.T) {
 	}
 }
 
+func TestScanChatMetadata_SkipsRequestLog(t *testing.T) {
+	lines := []string{
+		`{"type":"user","message":{"content":"hello"},"isMeta":false,"version":"2.1.302"}`,
+		`{"type":"api-request","sessionId":"x","version":"2.1.302"}`,
+		`{"type":"api-request-blob","sessionId":"x"}`,
+		`{"type":"api-request-shape","sessionId":"x","shape":{}}`,
+		`{"type":"assistant","message":{"content":"hi"}}`,
+		`not json`,
+	}
+	path := writeTempJSONL(t, lines)
+	title, _, _, lineCount := scanChatMetadata(path)
+
+	if lineCount != 3 {
+		t.Errorf("lineCount = %d, want 3 (request log records are not counted, other lines are)", lineCount)
+	}
+	if title != "hello" {
+		t.Errorf("title = %q, want %q", title, "hello")
+	}
+}
+
 func TestScanChatMetadata_ForkParentID(t *testing.T) {
 	// Locks in extraction of forkedFrom.sessionId. Without this the JSON tag
 	// could silently drift (e.g. renamed to session_id) and detection would
