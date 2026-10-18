@@ -22,17 +22,32 @@ For users with large chat histories (hundreds of sessions):
 
 ## Tabs
 
-- **`←`** / **`→`** - Switch between the **Chats** and **Settings** tabs
+- **`←`** / **`→`** - Switch between the **Chats**, **Memory** and **Settings** tabs
 
 ## Grouped View
 
-When chats are grouped by project (toggled in **Settings**):
+When **Group By Project** is on (toggled in **Settings**), both the **Chats** and
+the **Memory** tab are grouped:
 
 - **`ENTER`** on a project header - Expand or collapse that project
-- **`<Space>`** on a project header - Select or deselect every chat in it
+- **`<Space>`** on a project header - Select or deselect every item in it
 - **`d`** on a project header - When nothing is selected, auto-selects every
-  chat in that project and asks to delete them; an existing selection is used
+  item in that project and asks to delete them; an existing selection is used
   as is
+
+## Memory Tab
+
+Lists the project memory notes (`projects/<project>/memory/*.md`); the
+`MEMORY.md` index itself is not listed. Navigation is the same as on the
+**Chats** tab, and the selection is kept separately from the chat selection.
+
+- **`<Space>`** - Toggle selection for the current note
+- **`a`** - Toggle select/deselect all notes
+- **`d`** - Delete selected notes; if nothing is selected, the note under the
+  cursor is auto-selected for this single action. The confirmation dialog works
+  as for chats
+- **`c`** - Copy the note's file path to clipboard
+- **`r`** - Refresh the list (reload from disk)
 
 ## Settings Tab
 

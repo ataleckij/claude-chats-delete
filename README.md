@@ -22,6 +22,7 @@ Tested with Claude Code **v2.1.274**.
 
 - Browse chat sessions across all projects, with optional grouped-by-project view
 - Bulk delete with full on-disk cleanup (subagents, tool-results, file-history, tasks, background job state, prompt history, security and telemetry leftovers, and more)
+- Browse and delete project memory notes (`projects/<project>/memory/*.md`) in the **Memory** tab, keeping each project's `MEMORY.md` index in sync
 - Copy chat UUID to clipboard
 - Point the tool at any Claude directory, honoring `CLAUDE_CONFIG_DIR`
 - View and change how long Claude Code keeps its own sessions (`cleanupPeriodDays`)
@@ -59,7 +60,8 @@ Older Claude Code layouts are still cleaned up when present: `todos/<uuid>-*.jso
 the Claude directory root.
 
 Project- and user-scoped state (`projects/<project>/memory/`,
-`agent-memory/<agent>/`, `memory-project.md`, `memory-user.md`) is preserved. See
+`agent-memory/<agent>/`, `memory-project.md`, `memory-user.md`) is preserved;
+project memory notes are deleted only from the **Memory** tab. See
 [docs/deletion-behavior.md](docs/deletion-behavior.md) for the full breakdown and
 the confirmation flow.
 

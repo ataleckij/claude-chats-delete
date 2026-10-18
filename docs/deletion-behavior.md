@@ -87,10 +87,30 @@ index at all; when it is absent the update is a no-op.
 Project- and user-scoped state is preserved: `projects/<project>/memory/`
 (project memory notes) and `agent-memory/<agent>/` (per-agent memory, which is
 project-scoped in the current layout) are not tied to a single chat and are left
-untouched on delete.
+untouched on chat delete. Memory notes can be deleted from the **Memory** tab,
+see below.
 
 Debug logs are not written by default in recent Claude Code versions unless
 `/debug` is enabled.
+
+## Deleting Memory Notes
+
+The **Memory** tab deletes project memory notes with the same selection and
+confirmation flow as chats. For each deleted note:
+
+- The note file `projects/<project>/memory/<name>.md` is removed.
+- Every line of that project's `MEMORY.md` index that links to the note
+  (`[...](<name>.md)`, also written as `./<name>.md` or `<<name>.md>`) is
+  removed; the rest of the index is kept byte for byte. A project without an
+  index does not get one.
+
+The index is rewritten atomically, and it is reread if it changes while being
+read. Claude Code takes no lock on it, so a line Claude Code adds in the moment
+between that check and the rewrite can still be lost. Claude Code's
+`memory/.consolidate-lock` is not consulted: it only keeps two automatic memory
+consolidations from running at once, and Claude Code's own memory writes ignore
+it. If the index cannot be updated, the notes stay deleted and a warning is
+shown.
 
 ## Claude Directory Layout
 
@@ -103,7 +123,7 @@ The files above live in `~/.claude/`:
 │   ├── <uuid>/                   # chat directory
 │   │   ├── subagents/            # subagent conversations
 │   │   └── tool-results/         # tool execution results
-│   ├── memory/                   # project memory (preserved)
+│   ├── memory/                   # project memory (deleted only from the Memory tab)
 │   └── sessions-index.json       # chat index (updated on delete, may be absent)
 ├── file-history/<uuid>/          # file version history
 ├── debug/<uuid>.txt              # debug logs

@@ -18,11 +18,21 @@ type memRow struct {
 	fileIdx  int // index into m.memory (-1 for headers)
 }
 
-// loadMemory rereads the memory files from disk and resets the tab's viewport.
+// memoryDeleteCompleteMsg reports a finished delete of memory notes. warning
+// carries every failure, including an index that could not be updated.
+type memoryDeleteCompleteMsg struct {
+	count   int
+	warning string
+}
+
+// loadMemory rereads the memory files from disk and resets the tab's viewport
+// and selection.
 func (m *model) loadMemory() {
 	m.memory = findAllMemoryFiles()
 	m.memCursor = 0
 	m.memScroll = 0
+	m.memSelected = make(map[int]bool)
+	m.memAutoSelected = false
 	m.rebuildMemRows()
 }
 
@@ -58,14 +68,86 @@ func (m *model) rebuildMemRows() {
 	m.memRows = rows
 }
 
-func (m model) memoryCountForProject(project string) int {
-	count := 0
-	for _, f := range m.memory {
+func (m model) memoryIndicesForProject(project string) []int {
+	var indices []int
+	for i, f := range m.memory {
 		if f.Project == project {
-			count++
+			indices = append(indices, i)
 		}
 	}
-	return count
+	return indices
+}
+
+// toggleMemSelection selects every given note, or clears them all when every
+// one is already selected.
+func (m *model) toggleMemSelection(indices []int) {
+	all := true
+	for _, idx := range indices {
+		if !m.memSelected[idx] {
+			all = false
+			break
+		}
+	}
+	for _, idx := range indices {
+		if all {
+			delete(m.memSelected, idx)
+		} else {
+			m.memSelected[idx] = true
+		}
+	}
+}
+
+// updateMemoryConfirm handles keys while the delete confirmation is shown.
+// Once confirmed, the dialog stays up and swallows every key, quitting
+// included, until the delete reports back: quitting halfway would leave the
+// index linking to notes already removed.
+func (m model) updateMemoryConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.deleting {
+		return m, nil
+	}
+	switch msg.String() {
+	case "enter":
+		m.deleting = true
+		return m, m.deleteSelectedMemory()
+	case "esc", "n":
+		m.memConfirm = false
+		if m.memAutoSelected {
+			m.memSelected = make(map[int]bool)
+			m.memAutoSelected = false
+		}
+	}
+	return m, nil
+}
+
+func (m model) deleteSelectedMemory() tea.Cmd {
+	var toDelete []MemoryFile
+	for idx := range m.memSelected {
+		if idx < len(m.memory) {
+			toDelete = append(toDelete, m.memory[idx])
+		}
+	}
+	return func() tea.Msg {
+		count, err := deleteMemoryFiles(toDelete)
+		msg := memoryDeleteCompleteMsg{count: count}
+		if err != nil {
+			msg.warning = err.Error()
+		}
+		return msg
+	}
+}
+
+func (m model) memoryDeleteComplete(msg memoryDeleteCompleteMsg) (tea.Model, tea.Cmd) {
+	m.deleting = false
+	m.loadMemory()
+	m.memConfirm = false
+	m.memDeleted = msg.count
+	m.error = msg.warning
+	m.copiedMsg = ""
+	m.deleteTimer++
+	currentTimer := m.deleteTimer
+	return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return clearDeleteMsg{id: currentTimer}
+	})
 }
 
 func (m *model) adjustMemScroll() {
@@ -77,9 +159,11 @@ func (m *model) adjustMemScroll() {
 	}
 }
 
-// updateMemory handles key events on the memory tab, which is read-only: there
-// is no selection and nothing here deletes.
+// updateMemory handles key events on the memory tab.
 func (m model) updateMemory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.memSelected == nil {
+		m.memSelected = make(map[int]bool)
+	}
 	rowCount := len(m.memRows)
 	last := rowCount - 1
 	if last < 0 {
@@ -132,10 +216,50 @@ func (m model) updateMemory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case " ":
+		if m.memCursor < rowCount {
+			m.memAutoSelected = false
+			row := m.memRows[m.memCursor]
+			if row.isHeader {
+				m.toggleMemSelection(m.memoryIndicesForProject(row.project))
+			} else {
+				m.toggleMemSelection([]int{row.fileIdx})
+			}
+		}
+
+	case "a":
+		if len(m.memory) > 0 {
+			m.memAutoSelected = false
+			if len(m.memSelected) == len(m.memory) {
+				m.memSelected = make(map[int]bool)
+			} else {
+				for i := range m.memory {
+					m.memSelected[i] = true
+				}
+			}
+		}
+
+	case "d":
+		// Explicit selection wins: only the row under the cursor is picked, and
+		// only when nothing is selected. A project header picks all its notes.
+		if len(m.memSelected) == 0 && m.memCursor < rowCount {
+			row := m.memRows[m.memCursor]
+			if row.isHeader {
+				m.toggleMemSelection(m.memoryIndicesForProject(row.project))
+			} else {
+				m.toggleMemSelection([]int{row.fileIdx})
+			}
+			m.memAutoSelected = len(m.memSelected) > 0
+		}
+		if len(m.memSelected) > 0 {
+			m.memConfirm = true
+		}
+
 	case "r":
 		m.loadMemory()
 		m.error = ""
 		m.deleted = 0
+		m.memDeleted = 0
 		m.copiedMsg = ""
 
 	case "c":
@@ -149,6 +273,7 @@ func (m model) updateMemory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.copiedMsg = fmt.Sprintf("Path copied: %s", path)
 				m.error = ""
 				m.deleted = 0
+				m.memDeleted = 0
 				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 					return clearCopiedMsg{id: currentTimer}
 				})
@@ -183,11 +308,11 @@ func (m model) viewMemory() string {
 
 	var nameWidth, descWidth, projectWidth int
 	if m.grouped {
-		remaining := width - 4 - timestampWidth - 4 // indent + ts + gaps
+		remaining := width - 5 - timestampWidth - 4 // indicator + indent + ts + gaps
 		nameWidth = remaining * 35 / 100
 		descWidth = remaining - nameWidth
 	} else {
-		remaining := width - 2 - timestampWidth - 6 // indent + ts + gaps
+		remaining := width - 4 - timestampWidth - 6 // indicator + ts + gaps
 		nameWidth = remaining * 30 / 100
 		projectWidth = remaining * 25 / 100
 		if projectWidth < 10 {
@@ -213,9 +338,9 @@ func (m model) viewMemory() string {
 	// Column headers
 	var header string
 	if m.grouped {
-		header = fmt.Sprintf("    %-*s  %-*s  %-*s", timestampWidth, "MODIFIED", nameWidth, "FILE", descWidth, "DESCRIPTION")
+		header = fmt.Sprintf("     %-*s  %-*s  %-*s", timestampWidth, "MODIFIED", nameWidth, "FILE", descWidth, "DESCRIPTION")
 	} else {
-		header = fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s", timestampWidth, "MODIFIED", nameWidth, "FILE", descWidth, "DESCRIPTION", projectWidth, "PROJECT")
+		header = fmt.Sprintf("    %-*s  %-*s  %-*s  %-*s", timestampWidth, "MODIFIED", nameWidth, "FILE", descWidth, "DESCRIPTION", projectWidth, "PROJECT")
 	}
 	s.WriteString(dimStyle.Render(header))
 	s.WriteString("\n")
@@ -236,14 +361,29 @@ func (m model) viewMemory() string {
 		row := m.memRows[i]
 
 		var line string
+		selected := false
 		if row.isHeader {
 			arrow := "▸"
 			if m.memExpanded[row.project] {
 				arrow = "▾"
 			}
+			indices := m.memoryIndicesForProject(row.project)
+			sel := 0
+			for _, idx := range indices {
+				if m.memSelected[idx] {
+					sel++
+				}
+			}
+			indicator := "[ ]"
+			if sel > 0 && sel == len(indices) {
+				indicator = "[✓]"
+				selected = true
+			} else if sel > 0 {
+				indicator = "[~]"
+			}
 			projectClean := displayText(row.project)
-			countInfo := dimStyle.Render(fmt.Sprintf("(%d files)", m.memoryCountForProject(row.project)))
-			left := fmt.Sprintf("%s %s", arrow, projectClean)
+			countInfo := dimStyle.Render(fmt.Sprintf("(%d files, %d selected)", len(indices), sel))
+			left := fmt.Sprintf("%s %s %s", indicator, arrow, projectClean)
 
 			// Anchor the count info to the right edge (same gap trick as the tab bar).
 			gap := width - lipgloss.Width(left) - lipgloss.Width(countInfo)
@@ -253,6 +393,11 @@ func (m model) viewMemory() string {
 			line = left + strings.Repeat(" ", gap) + countInfo
 		} else {
 			f := m.memory[row.fileIdx]
+			selected = m.memSelected[row.fileIdx]
+			indicator := "[ ]"
+			if selected {
+				indicator = "[✓]"
+			}
 
 			timestamp := f.Modified
 			if timestampWidth == 11 && len(timestamp) >= 16 {
@@ -263,15 +408,18 @@ func (m model) viewMemory() string {
 			description := runewidth.Truncate(displayText(f.Description), descWidth, "..")
 
 			if m.grouped {
-				line = fmt.Sprintf("    %-*s  %-*s  %-*s", timestampWidth, timestamp, nameWidth, name, descWidth, description)
+				line = fmt.Sprintf("%s  %-*s  %-*s  %-*s", indicator, timestampWidth, timestamp, nameWidth, name, descWidth, description)
 			} else {
 				projectClean := displayText(f.Project)
 				project := truncateLeft(projectClean, projectWidth-2)
-				line = fmt.Sprintf("  %-*s  %-*s  %-*s  %-*s", timestampWidth, timestamp, nameWidth, name, descWidth, description, projectWidth, project)
+				line = fmt.Sprintf("%s %-*s  %-*s  %-*s  %-*s", indicator, timestampWidth, timestamp, nameWidth, name, descWidth, description, projectWidth, project)
 			}
 		}
 
 		style := lipgloss.NewStyle()
+		if selected {
+			style = selectedStyle
+		}
 		if i == m.memCursor {
 			style = cursorStyle
 		}
@@ -292,27 +440,40 @@ func (m model) viewMemory() string {
 
 	// Status messages
 	if m.error != "" {
-		s.WriteString(errorStyle.Render("Error: " + m.error))
+		// A delete can report several failures with file paths in them; keep
+		// them on the one status line the layout reserves.
+		s.WriteString(errorStyle.Render(runewidth.Truncate("Error: "+displayText(m.error), width, "..")))
+		s.WriteString("\n")
+	} else if m.memDeleted > 0 {
+		s.WriteString(successStyle.Render(fmt.Sprintf("✓ Deleted %d memory file(s)", m.memDeleted)))
 		s.WriteString("\n")
 	} else if m.copiedMsg != "" {
 		s.WriteString(successStyle.Render("✓ " + m.copiedMsg))
 		s.WriteString("\n")
 	}
 
-	// Help
+	// Help / Confirmation dialog
 	expand := ""
 	if m.grouped {
 		expand = "Enter: Expand | "
 	}
-	if compact {
-		actionsLine := "Actions:    " + expand + "c: Copy Path | r: Refresh | q: Quit"
+	if m.memConfirm && m.deleting {
+		s.WriteString(errorStyle.Render(fmt.Sprintf("Deleting %d memory file(s)...", len(m.memSelected))))
+		s.WriteString("\n")
+	} else if m.memConfirm {
+		s.WriteString(errorStyle.Render(fmt.Sprintf("Delete %d memory file(s)?", len(m.memSelected))))
+		s.WriteString(" ")
+		s.WriteString(helpStyle.Render("[ENTER=Yes] [ESC=No]"))
+		s.WriteString("\n")
+	} else if compact {
+		actionsLine := "Actions:    <Space>: Toggle | a: Toggle All | " + expand + "d: Delete | c: Copy Path | r: Refresh | q: Quit"
 		navLine := "Navigation: ↑/↓: Items | ←/→: Tabs | f/b: PgDn/PgUp | F/B: Half | g/G: Home/End"
 		s.WriteString(helpStyle.Render(actionsLine))
 		s.WriteString("\n")
 		s.WriteString(helpStyle.Render(navLine))
 		s.WriteString("\n")
 	} else {
-		help := "↑/↓:Items | ←/→:Tabs | " + strings.ReplaceAll(expand, ": ", ":") + "c:Copy Path | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
+		help := "↑/↓:Items | ←/→:Tabs | <Space>:Toggle | a:Toggle All | " + strings.ReplaceAll(expand, ": ", ":") + "c:Copy Path | d:Delete | r:Refresh | f/b:PgUp/PgDn | g/G:Home/End | q/esc:Quit"
 		s.WriteString(helpStyle.Render(help))
 		s.WriteString("\n")
 	}

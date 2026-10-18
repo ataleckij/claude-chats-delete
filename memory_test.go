@@ -135,6 +135,7 @@ func makeMemoryModel(files []MemoryFile, grouped bool, width, height int) model 
 		expandedProjects: make(map[string]bool),
 		memExpanded:      make(map[string]bool),
 		memory:           files,
+		memSelected:      make(map[int]bool),
 	}
 	m.rebuildMemRows()
 	return m
@@ -258,18 +259,208 @@ func TestUpdateMemory_NavigationAndExpand(t *testing.T) {
 	}
 }
 
-func TestUpdateMemory_IsReadOnly(t *testing.T) {
-	m := makeMemoryModel(makeTestMemory(1, 2), false, normalWidth, 20)
+func TestUpdateMemory_SelectAndConfirm(t *testing.T) {
+	m := makeMemoryModel(makeTestMemory(1, 3), false, normalWidth, 20)
 	m.chats = makeTestChats(3)
 
-	for _, r := range []rune{' ', 'a', 'd'} {
-		m = send(m, keyRune(r))
+	m = send(m, keyRune(' '))
+	if !m.memSelected[0] || len(m.memSelected) != 1 {
+		t.Fatalf("space should select the note under the cursor: %v", m.memSelected)
 	}
+	m = send(m, keyRune('a'))
+	if len(m.memSelected) != 3 {
+		t.Fatalf("a should select every note: %v", m.memSelected)
+	}
+	m = send(m, keyRune('a'))
+	if len(m.memSelected) != 0 {
+		t.Fatalf("a with everything selected should clear: %v", m.memSelected)
+	}
+
+	// d with nothing selected picks the cursor row; esc drops that pick again.
+	m = send(m, keyRune('j'))
+	m = send(m, keyRune('d'))
+	if !m.memConfirm || !m.memSelected[1] || len(m.memSelected) != 1 {
+		t.Fatalf("d should confirm the note under the cursor: confirm=%v selected=%v", m.memConfirm, m.memSelected)
+	}
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = next.(model)
+	if m.memConfirm || len(m.memSelected) != 0 {
+		t.Errorf("esc should cancel and drop the automatic pick: confirm=%v selected=%v", m.memConfirm, m.memSelected)
+	}
+	if cmd != nil || len(m.memory) != 3 {
+		t.Errorf("esc in the dialog must neither quit nor delete")
+	}
+
 	if len(m.selected) != 0 || m.confirmDelete {
-		t.Errorf("selection keys must do nothing on the memory tab: selected=%v confirm=%v", m.selected, m.confirmDelete)
+		t.Errorf("the chat selection must stay untouched: selected=%v confirm=%v", m.selected, m.confirmDelete)
 	}
-	if len(m.memory) != 2 {
-		t.Errorf("memory list changed: %d files", len(m.memory))
+}
+
+func TestUpdateMemory_GroupedHeaderSelectsProject(t *testing.T) {
+	m := makeMemoryModel(makeTestMemory(2, 2), true, normalWidth, 20)
+
+	m = send(m, keyRune(' '))
+	if len(m.memSelected) != 2 || !m.memSelected[0] || !m.memSelected[1] {
+		t.Fatalf("space on a header should select its project's notes: %v", m.memSelected)
+	}
+	if !strings.Contains(stripANSI(m.View()), "(2 files, 2 selected)") {
+		t.Errorf("header should count the selected notes")
+	}
+	m = send(m, keyRune(' '))
+	if len(m.memSelected) != 0 {
+		t.Fatalf("space on a fully selected header should clear it: %v", m.memSelected)
+	}
+
+	m = send(m, keyRune('j'))
+	m = send(m, keyRune('d'))
+	if !m.memConfirm || len(m.memSelected) != 2 || !m.memSelected[2] || !m.memSelected[3] {
+		t.Errorf("d on a header should pick its whole project: %v", m.memSelected)
+	}
+}
+
+func TestUpdateMemory_DeleteRemovesNotesAndIndexLines(t *testing.T) {
+	setupStorageDirs(t)
+	doomed := writeMemory(t, "-proj-a", "doomed.md", memoryNote, time.Hour)
+	kept := writeMemory(t, "-proj-a", "kept.md", memoryNote, 2*time.Hour)
+	index := writeMemory(t, "-proj-a", memoryIndexFile, "- [Doomed](doomed.md) - hook\n- [Kept](kept.md) - hook\n", time.Minute)
+
+	m := makeMemoryModel(nil, false, normalWidth, 20)
+	m.loadMemory()
+	if len(m.memory) != 2 || m.memory[0].Path != doomed {
+		t.Fatalf("unexpected memory list: %+v", m.memory)
+	}
+
+	m = send(m, keyRune('d'))
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter in the dialog should start the delete")
+	}
+	next, _ = next.(model).Update(cmd())
+	m = next.(model)
+
+	if _, err := os.Stat(doomed); !os.IsNotExist(err) {
+		t.Errorf("deleted note still on disk: %v", err)
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Errorf("other note touched: %v", err)
+	}
+	data, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "- [Kept](kept.md) - hook\n"; got != want {
+		t.Errorf("index = %q, want %q", got, want)
+	}
+	if m.memDeleted != 1 || m.error != "" || len(m.memory) != 1 || len(m.memSelected) != 0 {
+		t.Errorf("after delete: deleted=%d error=%q files=%d selected=%v", m.memDeleted, m.error, len(m.memory), m.memSelected)
+	}
+	if !strings.Contains(stripANSI(m.View()), "Deleted 1 memory file(s)") {
+		t.Errorf("the delete count should be shown")
+	}
+}
+
+func TestUpdateMemory_KeysIgnoredWhileDeleting(t *testing.T) {
+	m := makeMemoryModel(makeTestMemory(1, 2), false, normalWidth, 20)
+	m = send(m, keyRune('d'))
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if cmd == nil || !m.deleting || !m.memConfirm {
+		t.Fatalf("enter should start the delete and keep the dialog up: cmd=%v deleting=%v confirm=%v", cmd != nil, m.deleting, m.memConfirm)
+	}
+	if !strings.Contains(stripANSI(m.View()), "Deleting 1 memory file(s)...") {
+		t.Errorf("the dialog should show the delete in progress")
+	}
+
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyEnter}, {Type: tea.KeyEsc}, {Type: tea.KeyCtrlC}, keyRune('q'), keyRune('n'),
+	} {
+		next, cmd := m.Update(key)
+		m = next.(model)
+		if cmd != nil {
+			t.Errorf("%q during a delete returned a command (quit or a second delete)", key.String())
+		}
+		if !m.memConfirm || !m.deleting {
+			t.Errorf("%q during a delete closed the dialog", key.String())
+		}
+	}
+
+	next, _ = m.Update(memoryDeleteCompleteMsg{count: 1})
+	m = next.(model)
+	if m.memConfirm || m.deleting {
+		t.Errorf("the dialog should close once the delete reports back")
+	}
+}
+
+func TestViewMemory_MultiLineErrorStaysOnOneLine(t *testing.T) {
+	m := makeMemoryModel(makeTestMemory(1, 1), false, normalWidth, 20)
+	clean := strings.Count(stripANSI(m.View()), "\n")
+	m.error = "remove /a/one.md: denied\nremove /a/two.md: denied\nremove /a/three.md: denied"
+
+	output := stripANSI(m.View())
+	if got := strings.Count(output, "\n"); got != clean+1 {
+		t.Errorf("view has %d lines, want %d: the error must take exactly one line\noutput:\n%s", got, clean+1, output)
+	}
+	if !strings.Contains(output, "Error: remove /a/one.md: denied remove") {
+		t.Errorf("errors should be joined on one line\noutput:\n%s", output)
+	}
+}
+
+func TestDeleteMemoryFiles(t *testing.T) {
+	setupStorageDirs(t)
+	a1 := writeMemory(t, "-proj-a", "one.md", memoryNote, time.Hour)
+	writeMemory(t, "-proj-a", "two.md", memoryNote, time.Hour)
+	indexA := writeMemory(t, "-proj-a", memoryIndexFile, "# Memory\r\n- [One](one.md) - hook\r\n- [Two](two.md) - hook\r\n", time.Hour)
+	// A project without an index must not get one.
+	b1 := writeMemory(t, "-proj-b", "one.md", memoryNote, time.Hour)
+	gone := MemoryFile{Project: "-proj-a", Name: "gone.md", Path: filepath.Join(filepath.Dir(a1), "gone.md")}
+
+	files := []MemoryFile{
+		{Project: "-proj-a", Name: "one.md", Path: a1},
+		{Project: "-proj-b", Name: "one.md", Path: b1},
+		gone,
+	}
+	count, err := deleteMemoryFiles(files)
+	if err != nil || count != 3 {
+		t.Fatalf("deleteMemoryFiles = %d, %v; want 3, nil (a note already gone counts)", count, err)
+	}
+
+	data, err := os.ReadFile(indexA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "# Memory\r\n- [Two](two.md) - hook\r\n"; got != want {
+		t.Errorf("index = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(b1), memoryIndexFile)); !os.IsNotExist(err) {
+		t.Errorf("an index was created where there was none: %v", err)
+	}
+}
+
+func TestFilterMemoryIndex(t *testing.T) {
+	names := map[string]bool{"note.md": true, "other.md": true}
+	input := strings.Join([]string{
+		"# Index",
+		"- [Note](note.md) - bare",
+		"- [Note](./note.md) - dot slash",
+		"- [Note](<note.md>) - angle brackets",
+		`- [Note](note.md "title") - with a title`,
+		"- [Two](keep.md) and [other](other.md) - any link counts",
+		"- [Similar](my-note.md) - only the exact name matches",
+		"- [Sub](sub/note.md) - another directory",
+		"note.md mentioned without a link",
+		"- [Last](note.md) - no trailing newline",
+	}, "\n")
+
+	kept, dropped := filterMemoryIndex([]byte(input), names)
+	want := strings.Join([]string{
+		"# Index",
+		"- [Similar](my-note.md) - only the exact name matches",
+		"- [Sub](sub/note.md) - another directory",
+		"note.md mentioned without a link",
+		"",
+	}, "\n")
+	if string(kept) != want || dropped != 6 {
+		t.Errorf("filterMemoryIndex dropped %d\ngot:\n%q\nwant:\n%q", dropped, kept, want)
 	}
 }
 

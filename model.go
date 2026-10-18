@@ -171,6 +171,12 @@ type model struct {
 	memScroll   int
 	memExpanded map[string]bool
 	memRows     []memRow // flat: one row per file; grouped: headers + expanded files
+	// Selection and delete state of the memory tab, kept apart from the chat
+	// tab's so neither tab acts on the other's selection.
+	memSelected     map[int]bool // indices into memory
+	memAutoSelected bool
+	memConfirm      bool
+	memDeleted      int
 }
 
 func initialModel(cfg *Config) model {
@@ -301,7 +307,7 @@ func (m model) renderTabBar() string {
 	case tabChats:
 		stats = dimStyle.Render(fmt.Sprintf("Total: %d | Selected: %d", len(m.chats), len(m.selected)))
 	case tabMemory:
-		stats = dimStyle.Render(fmt.Sprintf("Total: %d", len(m.memory)))
+		stats = dimStyle.Render(fmt.Sprintf("Total: %d | Selected: %d", len(m.memory), len(m.memSelected)))
 	default:
 		return left
 	}
@@ -341,6 +347,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// Confirmation dialog intercepts esc before global keys
+		if m.memConfirm {
+			return m.updateMemoryConfirm(msg)
+		}
 		if m.confirmDelete {
 			switch msg.String() {
 			case "enter":
@@ -666,7 +675,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case clearDeleteMsg:
 		if msg.id == m.deleteTimer {
 			m.deleted = 0
+			m.memDeleted = 0
 		}
+
+	case memoryDeleteCompleteMsg:
+		return m.memoryDeleteComplete(msg)
 	}
 
 	return m, nil
