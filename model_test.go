@@ -70,10 +70,14 @@ func TestView_EmptyChats(t *testing.T) {
 	m := makeTestModel(nil, normalWidth, 20)
 	output := stripANSI(m.View())
 
-	// Empty state is a special path returning "No chats found.\n\nPress q to quit.\n"
+	// No special screen: the usual frame around an empty list.
+	expected := fixedHeaderLines + 0 + 0 + 0 + fixedFooterLines
 	got := strings.Count(output, "\n")
-	if got != 3 {
-		t.Errorf("empty state: expected 3 lines, got %d\noutput: %q", got, output)
+	if got != expected {
+		t.Errorf("empty state: expected %d lines, got %d\noutput: %q", expected, got, output)
+	}
+	if !strings.Contains(output, "Chats") || !strings.Contains(output, "Settings") {
+		t.Errorf("empty state should still show the tab bar\noutput: %q", output)
 	}
 }
 
@@ -256,9 +260,10 @@ func makeGroupedModel(chats []Chat, width, height int) model {
 func TestViewGrouped_EmptyChats(t *testing.T) {
 	m := makeGroupedModel(nil, normalWidth, 20)
 	output := stripANSI(m.View())
+	expected := fixedHeaderLines + 0 + 0 + 0 + fixedFooterLines
 	got := strings.Count(output, "\n")
-	if got != 3 {
-		t.Errorf("grouped empty state: expected 3 lines, got %d\noutput: %q", got, output)
+	if got != expected {
+		t.Errorf("grouped empty state: expected %d lines, got %d\noutput: %q", expected, got, output)
 	}
 }
 

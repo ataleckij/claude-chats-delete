@@ -19,10 +19,11 @@ const compactModeWidth = 110
 
 const (
 	tabChats    = 0
-	tabSettings = 1
+	tabMemory   = 1
+	tabSettings = 2
 )
 
-var tabs = []string{"Chats", "Settings"}
+var tabs = []string{"Chats", "Memory", "Settings"}
 
 var (
 	// Styles
@@ -144,10 +145,19 @@ type model struct {
 	cleanupBase     cleanupState
 	cleanupConflict *cleanupState
 
-	// Grouped view state
+	// Grouped view state. grouped applies to the chats and memory tabs alike;
+	// each keeps its own expanded projects and row list.
 	grouped          bool
 	expandedProjects map[string]bool
 	groupRows        []groupRow // virtual row list built from chats + expanded state
+
+	// Memory tab: its own cursor and scroll position, so switching tabs does
+	// not move either list.
+	memory      []MemoryFile
+	memCursor   int
+	memScroll   int
+	memExpanded map[string]bool
+	memRows     []memRow // flat: one row per file; grouped: headers + expanded files
 }
 
 func initialModel(cfg *Config) model {
@@ -158,10 +168,12 @@ func initialModel(cfg *Config) model {
 		selected:         make(map[int]bool),
 		grouped:          grouped,
 		expandedProjects: make(map[string]bool),
+		memExpanded:      make(map[string]bool),
 	}
 	if m.grouped {
 		m.rebuildGroupRows()
 	}
+	m.loadMemory()
 	return m
 }
 
@@ -264,10 +276,6 @@ func (m model) renderTabBar() string {
 	appName := dimStyle.Render("Claude Chats Delete")
 	var tabParts []string
 	for i, name := range tabs {
-		// The chats tab is labeled "Projects" in grouped view.
-		if i == tabChats && m.grouped {
-			name = "Projects"
-		}
 		if i == m.tab {
 			tabParts = append(tabParts, activeTabStyle.Render(name))
 		} else {
@@ -275,10 +283,15 @@ func (m model) renderTabBar() string {
 		}
 	}
 	left := appName + "   " + strings.Join(tabParts, " ")
-	if m.tab != tabChats {
+	var stats string
+	switch m.tab {
+	case tabChats:
+		stats = dimStyle.Render(fmt.Sprintf("Total: %d | Selected: %d", len(m.chats), len(m.selected)))
+	case tabMemory:
+		stats = dimStyle.Render(fmt.Sprintf("Total: %d", len(m.memory)))
+	default:
 		return left
 	}
-	stats := dimStyle.Render(fmt.Sprintf("Total: %d | Selected: %d", len(m.chats), len(m.selected)))
 	width := m.width
 	if width < 75 {
 		width = 75
@@ -371,8 +384,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						saveConfig(m.cfg)
 					}
 					// Everything derived from the old directory goes: chats,
-					// selection and its auto-select flag, expanded projects,
-					// and the viewport position.
+					// memory files, selection and its auto-select flag,
+					// expanded projects, and the viewport position.
+					m.memExpanded = make(map[string]bool)
+					m.loadMemory()
 					m.chats = findAllChats()
 					m.loadCleanupPeriod()
 					m.selected = make(map[int]bool)
@@ -455,11 +470,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.cursor = 0
 							m.scrollOffset = 0
 						}
+						m.memCursor = 0
+						m.memScroll = 0
+						m.rebuildMemRows()
 					}
 					saveConfig(m.cfg)
 				}
 			}
 			return m, nil
+		}
+
+		if m.tab == tabMemory {
+			return m.updateMemory(msg)
 		}
 
 		// Chats tab: grouped mode
@@ -488,6 +510,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor >= len(m.chats) {
 				m.cursor = len(m.chats) - 1
 			}
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
 			m.adjustScroll()
 
 		case "b", "pgup":
@@ -503,6 +528,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cursor += visibleHeight / 2
 			if m.cursor >= len(m.chats) {
 				m.cursor = len(m.chats) - 1
+			}
+			if m.cursor < 0 {
+				m.cursor = 0
 			}
 			m.adjustScroll()
 
@@ -525,6 +553,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.adjustScroll()
 
 		case " ":
+			if m.cursor >= len(m.chats) {
+				return m, nil // Nothing to select
+			}
 			// Explicit toggle — user now owns the selection.
 			m.autoSelected = false
 			if m.selected[m.cursor] {
@@ -606,9 +637,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Clear other status messages
 		m.error = msg.warning
 		m.copiedMsg = ""
-		if len(m.chats) == 0 {
-			return m, tea.Quit
-		}
 		return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 			return clearDeleteMsg{id: currentTimer}
 		})
@@ -788,13 +816,12 @@ func (m model) View() string {
 	if m.tab == tabSettings {
 		return m.viewSettings()
 	}
+	if m.tab == tabMemory {
+		return m.viewMemory()
+	}
 
 	if m.grouped {
 		return m.viewGrouped()
-	}
-
-	if len(m.chats) == 0 {
-		return activeTabStyle.Render("No chats found.") + "\n\nPress q to quit.\n"
 	}
 
 	// Calculate column widths based on terminal width
@@ -996,6 +1023,9 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cursor >= rowCount {
 			m.cursor = rowCount - 1
 		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
 		m.adjustScrollGrouped()
 
 	case "b", "pgup":
@@ -1009,6 +1039,9 @@ func (m model) updateGrouped(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor += m.visibleHeight() / 2
 		if m.cursor >= rowCount {
 			m.cursor = rowCount - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
 		}
 		m.adjustScrollGrouped()
 
@@ -1171,10 +1204,6 @@ func (m model) selectedCountForProject(project string) (selected, total int) {
 }
 
 func (m model) viewGrouped() string {
-	if len(m.chats) == 0 {
-		return activeTabStyle.Render("No chats found.") + "\n\nPress q to quit.\n"
-	}
-
 	width := m.width
 	if width < 75 {
 		width = 75
